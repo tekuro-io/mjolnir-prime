@@ -1,3 +1,4 @@
+# ===== FILE: trading_simulator/__init__.py =====
 """
 Trading Simulator - A modular stock trading simulation framework.
 

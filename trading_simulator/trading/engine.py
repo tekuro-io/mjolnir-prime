@@ -22,8 +22,11 @@ class TradeEngine:
         self.pending_orders: List[Order] = []
         self.executed_orders: List[Order] = []
         
+        # Pattern detection
         self.pattern_detector = pattern_detector
         self.detected_patterns: List[PatternMatch] = []
+        
+        # Algorithm callbacks - will be set by trading algorithms
         self.algorithm_callbacks: List[Callable[[CandlestickTick, List[PatternMatch]], None]] = []
         
     def process_tick(self, tick: CandlestickTick) -> None:
@@ -192,14 +195,20 @@ class TradeEngine:
     
     def get_portfolio_summary(self) -> dict:
         """Get current portfolio summary"""
+        portfolio_value = self.portfolio.get_portfolio_value(self.current_prices)
+        total_pnl = self.portfolio.get_pnl(self.current_prices)
+        unrealized_pnl = self.portfolio.get_unrealized_pnl(self.current_prices)
+        realized_pnl = self.portfolio.get_realized_pnl()
+        positions_summary = self.portfolio.get_positions_summary(self.current_prices)
+        
         return {
             'cash': self.portfolio.cash,
             'initial_balance': self.portfolio.initial_balance,
-            'positions': self.portfolio.get_positions_summary(self.current_prices),
-            'portfolio_value': self.portfolio.get_portfolio_value(self.current_prices),
-            'total_pnl': self.portfolio.get_pnl(self.current_prices),
-            'unrealized_pnl': self.portfolio.get_unrealized_pnl(self.current_prices),
-            'realized_pnl': self.portfolio.get_realized_pnl(),
+            'positions': positions_summary,
+            'portfolio_value': portfolio_value,
+            'total_pnl': total_pnl,
+            'unrealized_pnl': unrealized_pnl,
+            'realized_pnl': realized_pnl,
             'current_prices': self.current_prices.copy(),
             'patterns_detected': len(self.detected_patterns),
             'pending_orders': len(self.pending_orders),

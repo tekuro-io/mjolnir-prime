@@ -1,3 +1,4 @@
+# ===== FILE: trading_simulator/portfolio/__init__.py =====
 """Portfolio management components."""
 
 from .position import Position

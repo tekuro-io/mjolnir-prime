@@ -36,9 +36,19 @@ def demo_basic_trading():
     
     # Create strategy factory and add strategies
     strategy_factory = StrategyFactory(engine)
-    strategy_factory.create_balanced_setup()
     
-    print(f"Active strategies: {strategy_factory.list_strategies()}")
+    # Use smaller quantities for the demo
+    flat_top_strategy = PatternStrategies.create_flat_top_strategy(
+        engine, confidence_threshold=0.7, quantity=50, max_risk_per_trade=0.02
+    )
+    reversal_strategy = PatternStrategies.create_reversal_strategy(
+        engine, confidence_threshold=0.65, quantity=25  # Smaller quantity for expensive stocks
+    )
+    
+    strategy_factory.add_strategy("demo_flat_top", flat_top_strategy, PatternType.FLAT_TOP_BREAKOUT)
+    strategy_factory.add_strategy("demo_reversal", reversal_strategy, PatternType.BULLISH_REVERSAL)
+    
+    print(f"Active strategies: {list(strategy_factory.active_strategies.keys())}")
     
     # Generate some test data that will trigger patterns
     ticks = [
@@ -48,11 +58,11 @@ def demo_basic_trading():
         CandlestickTick('AAPL', datetime.now() + timedelta(minutes=2), 150.9, 151.1, 150.1, 150.9, 90000),
         CandlestickTick('AAPL', datetime.now() + timedelta(minutes=3), 150.9, 152.5, 150.8, 152.2, 150000),
         
-        # GOOGL bullish reversal pattern
-        CandlestickTick('GOOGL', datetime.now() + timedelta(minutes=4), 2800.0, 2820.0, 2795.0, 2815.0, 50000),
-        CandlestickTick('GOOGL', datetime.now() + timedelta(minutes=5), 2815.0, 2818.0, 2790.0, 2795.0, 60000),
-        CandlestickTick('GOOGL', datetime.now() + timedelta(minutes=6), 2795.0, 2800.0, 2780.0, 2785.0, 55000),
-        CandlestickTick('GOOGL', datetime.now() + timedelta(minutes=7), 2785.0, 2825.0, 2783.0, 2820.0, 80000),
+        # GOOGL bullish reversal pattern (use lower prices)
+        CandlestickTick('GOOGL', datetime.now() + timedelta(minutes=4), 280.0, 282.0, 279.5, 281.5, 50000),
+        CandlestickTick('GOOGL', datetime.now() + timedelta(minutes=5), 281.5, 281.8, 279.0, 279.5, 60000),
+        CandlestickTick('GOOGL', datetime.now() + timedelta(minutes=6), 279.5, 280.0, 278.0, 278.5, 55000),
+        CandlestickTick('GOOGL', datetime.now() + timedelta(minutes=7), 278.5, 282.5, 278.3, 282.0, 80000),
     ]
     
     print(f"\nProcessing {len(ticks)} candlestick ticks...")
@@ -65,14 +75,25 @@ def demo_basic_trading():
     summary = engine.get_portfolio_summary()
     print("\n=== Results ===")
     print(f"Portfolio Value: ${summary['portfolio_value']:,.2f}")
-    print(f"P&L: ${summary['total_pnl']:,.2f} ({summary['total_pnl']/summary['initial_balance']*100:.2f}%)")
-    print(f"Patterns Detected: {summary['patterns_detected']}")
-    print(f"Orders Executed: {summary['executed_orders']}")
+    print(f"Cash: ${summary['cash']:,.2f}")
     
     if summary['positions']:
-        print("\nPositions:")
+        print("Positions:")
         for symbol, pos in summary['positions'].items():
             print(f"  {symbol}: {pos['quantity']} shares @ ${pos['avg_cost']:.2f}")
+            print(f"    Current Price: ${pos['current_price']:.2f}")
+            print(f"    Market Value: ${pos['market_value']:,.2f}")
+            print(f"    Cost Basis: ${pos['cost_basis']:,.2f}")
+            print(f"    Unrealized P&L: ${pos['unrealized_pnl']:,.2f} ({pos['pnl_percent']:.2f}%)")
+    else:
+        print("No positions held")
+    
+    print(f"\n--- P&L Summary ---")
+    print(f"Total P&L: ${summary['total_pnl']:,.2f} ({summary['total_pnl']/summary['initial_balance']*100:.2f}%)")
+    print(f"Unrealized P&L: ${summary['unrealized_pnl']:,.2f}")
+    print(f"Realized P&L: ${summary['realized_pnl']:,.2f}")
+    print(f"Patterns Detected: {summary['patterns_detected']}")
+    print(f"Orders Executed: {summary['executed_orders']}")
     
     return engine
 
@@ -84,17 +105,49 @@ def demo_algorithm_framework():
     engine = create_demo_engine()
     algorithm_manager = AlgorithmManager(engine)
     
-    # Create and add algorithms
-    breakout_algo = SimpleBreakoutAlgorithm(engine, quantity=50)
-    algorithm_manager.add_algorithm(breakout_algo)
+    # Create algorithms that match the pattern types we'll generate
+    # Use a reversal algorithm since that's what we're generating
+    from trading_simulator.algorithms.base import PatternBasedAlgorithm
+    
+    class CustomReversalAlgorithm(PatternBasedAlgorithm):
+        def __init__(self, engine, quantity=30):
+            super().__init__(
+                name="ReversalTrader",
+                target_patterns=[PatternType.BULLISH_REVERSAL],
+                confidence_threshold=0.7
+            )
+            self.engine = engine
+            self.quantity = quantity
+        
+        def on_pattern(self, pattern):
+            print(f"🔄 {self.name}: {pattern.pattern_type.value} detected!")
+            print(f"   Confidence: {pattern.confidence:.2f}")
+            try:
+                order_id = self.engine.place_market_order(
+                    pattern.symbol, OrderSide.BUY, self.quantity
+                )
+                print(f"   Order placed: {order_id}")
+            except Exception as e:
+                print(f"   Error: {e}")
+    
+    # Add the reversal algorithm
+    reversal_algo = CustomReversalAlgorithm(engine, quantity=30)
+    algorithm_manager.add_algorithm(reversal_algo)
     
     print(f"Active algorithms: {algorithm_manager.get_active_algorithms()}")
     
-    # Generate pattern data
-    pattern_data = MockDataGenerator.generate_pattern_data('AAPL', 'flat_top_breakout')
+    # Generate reversal pattern data (matching what the algorithm expects)
+    print("\nGenerating bullish reversal pattern...")
+    pattern_data = [
+        CandlestickTick('AAPL', datetime.now(), 150.0, 152.0, 149.5, 151.5, 60000),  # Bullish
+        CandlestickTick('AAPL', datetime.now() + timedelta(minutes=1), 151.5, 151.8, 149.0, 149.5, 65000),  # Bearish
+        CandlestickTick('AAPL', datetime.now() + timedelta(minutes=2), 149.5, 150.0, 148.0, 148.5, 60000),  # More bearish
+        CandlestickTick('AAPL', datetime.now() + timedelta(minutes=3), 148.5, 152.5, 148.3, 152.0, 85000),  # Bullish confirmation
+    ]
     
-    print(f"\nProcessing {len(pattern_data)} pattern candlesticks...")
-    for tick in pattern_data:
+    print(f"Processing {len(pattern_data)} pattern candlesticks...")
+    for i, tick in enumerate(pattern_data):
+        print(f"Tick {i+1}: {tick.symbol} @ ${tick.close:.2f} ({tick.candle_type.value})")
         engine.process_tick(tick)
     
     # Show algorithm status
@@ -102,6 +155,11 @@ def demo_algorithm_framework():
     print(f"\nAlgorithm Status:")
     for name, info in status.items():
         print(f"  {name}: {info['trades_made']} trades, Active: {info['is_active']}")
+    
+    # Show results
+    summary = engine.get_portfolio_summary()
+    print(f"\nResults: Portfolio Value: ${summary['portfolio_value']:,.2f}")
+    print(f"Trades Executed: {summary['executed_orders']}")
     
     return engine, algorithm_manager
 
@@ -113,24 +171,54 @@ def demo_backtesting():
     engine = create_demo_engine()
     backtest_runner = BacktestRunner(engine)
     
-    # Create test algorithms
-    breakout_algo = SimpleBreakoutAlgorithm(engine, quantity=100)
+    # Create algorithm that matches the patterns we'll generate
+    from trading_simulator.algorithms.base import PatternBasedAlgorithm
     
-    # Generate test data
-    print("Generating test data...")
-    test_data = MockDataGenerator.generate_trending_data(
-        'AAPL', start_price=150.0, num_candles=50, trend=0.002, volatility=0.015
-    )
+    class DemoAlgorithm(PatternBasedAlgorithm):
+        def __init__(self, engine, quantity=40):
+            super().__init__(
+                name="DemoTrader",
+                target_patterns=[PatternType.FLAT_TOP_BREAKOUT, PatternType.BULLISH_REVERSAL],
+                confidence_threshold=0.6  # Lower threshold for demo
+            )
+            self.engine = engine
+            self.quantity = quantity
+        
+        def on_pattern(self, pattern):
+            print(f"💰 Trading on {pattern.pattern_type.value} (confidence: {pattern.confidence:.2f})")
+            try:
+                order_id = self.engine.place_market_order(
+                    pattern.symbol, OrderSide.BUY, self.quantity
+                )
+                print(f"   Order executed: {order_id}")
+            except Exception as e:
+                print(f"   Trade failed: {e}")
     
-    # Add some pattern data
-    pattern_data = MockDataGenerator.generate_pattern_data('AAPL', 'flat_top_breakout')
-    test_data.extend(pattern_data)
+    demo_algo = DemoAlgorithm(engine, quantity=40)
     
-    # Sort by timestamp
-    test_data.sort(key=lambda x: x.timestamp)
+    # Generate simple, clear test data
+    print("Generating test data with guaranteed patterns...")
+    test_data = []
+    
+    # Simple flat-top breakout (only 4 candles)
+    print("Creating flat-top breakout pattern...")
+    test_data = [
+        CandlestickTick('AAPL', datetime.now(), 150.0, 150.9, 149.5, 150.8, 50000),
+        CandlestickTick('AAPL', datetime.now() + timedelta(minutes=1), 150.8, 150.9, 150.0, 150.85, 45000),  # Flat top 1
+        CandlestickTick('AAPL', datetime.now() + timedelta(minutes=2), 150.85, 150.9, 150.1, 150.87, 40000),  # Flat top 2  
+        CandlestickTick('AAPL', datetime.now() + timedelta(minutes=3), 150.87, 152.5, 150.8, 152.2, 80000),  # Breakout!
+        
+        # Simple bullish reversal (4 candles)
+        CandlestickTick('AAPL', datetime.now() + timedelta(minutes=4), 152.2, 154.0, 151.0, 153.5, 60000),  # Bullish
+        CandlestickTick('AAPL', datetime.now() + timedelta(minutes=5), 153.5, 153.8, 152.0, 152.5, 65000),  # Bearish
+        CandlestickTick('AAPL', datetime.now() + timedelta(minutes=6), 152.5, 153.0, 151.0, 151.5, 60000),  # More bearish
+        CandlestickTick('AAPL', datetime.now() + timedelta(minutes=7), 151.5, 155.5, 151.3, 155.0, 85000),  # Bullish confirmation
+    ]
     
     print(f"Running backtest with {len(test_data)} candles...")
-    results = backtest_runner.run_backtest(breakout_algo, test_data)
+    print("Expected patterns: 1 flat_top_breakout + 1 bullish_reversal = 2 trades")
+    
+    results = backtest_runner.run_backtest(demo_algo, test_data)
     
     print(f"\n=== Backtest Results ===")
     print(f"Algorithm: {results['algorithm_name']}")
@@ -140,6 +228,30 @@ def demo_backtesting():
     print(f"Total Trades: {results['total_trades']}")
     print(f"Patterns Detected: {results['patterns_detected']}")
     print(f"Execution Time: {results['execution_time']:.2f} seconds")
+    
+    # Show which patterns were detected
+    if hasattr(backtest_runner.engine, 'detected_patterns') and backtest_runner.engine.detected_patterns:
+        print(f"\nPattern Types Detected:")
+        pattern_types = {}
+        for pattern in backtest_runner.engine.detected_patterns:
+            pattern_type = pattern.pattern_type.value
+            if pattern_type not in pattern_types:
+                pattern_types[pattern_type] = 0
+            pattern_types[pattern_type] += 1
+        
+        for pattern_type, count in pattern_types.items():
+            confidence_avg = sum(p.confidence for p in backtest_runner.engine.detected_patterns 
+                               if p.pattern_type.value == pattern_type) / count
+            print(f"  - {pattern_type}: {count} (avg confidence: {confidence_avg:.2f})")
+    
+    # Debug: Show final portfolio state
+    final_summary = engine.get_portfolio_summary()
+    if final_summary['positions']:
+        print("\nFinal Positions:")
+        for symbol, pos in final_summary['positions'].items():
+            print(f"  {symbol}: {pos['quantity']} shares")
+    else:
+        print("\nNo final positions (this might indicate a bug)")
     
     return results
 

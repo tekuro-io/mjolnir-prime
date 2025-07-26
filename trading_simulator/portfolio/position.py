@@ -35,8 +35,10 @@ class Position:
             self.avg_cost = price
         else:
             total_cost = (self.quantity * self.avg_cost) + (quantity * price)
-            self.quantity += quantity
-            self.avg_cost = total_cost / self.quantity if self.quantity > 0 else 0.0
+            new_quantity = self.quantity + quantity
+            self.avg_cost = total_cost / new_quantity if new_quantity > 0 else 0.0
+        
+        self.quantity += quantity  # Fixed: quantity added AFTER avg_cost calculation
         
     def remove_shares(self, quantity: int) -> bool:
         """Remove shares from position. Returns True if successful"""

@@ -1,3 +1,4 @@
+# ===== FILE: trading_simulator/core/__init__.py =====
 """Core components of the trading simulator."""
 
 from .types import OrderType, OrderSide, CandleType, PatternType

@@ -70,32 +70,52 @@ class Portfolio:
         """Calculate total portfolio value using current market prices"""
         total_value = self.cash
         for symbol, position in self.positions.items():
-            if position.quantity > 0 and symbol in current_prices:
-                total_value += position.current_market_value(current_prices[symbol])
+            if position.quantity > 0:
+                # Use current market price if available, otherwise use average cost
+                current_price = current_prices.get(symbol, position.avg_cost)
+                total_value += position.quantity * current_price
         return total_value
     
     def get_pnl(self, current_prices: Dict[str, float]) -> float:
-        """Calculate profit/loss vs initial balance"""
+        """Calculate total profit/loss vs initial balance"""
         return self.get_portfolio_value(current_prices) - self.initial_balance
     
     def get_unrealized_pnl(self, current_prices: Dict[str, float]) -> float:
         """Calculate unrealized P&L for all positions"""
         total_unrealized = 0.0
         for symbol, position in self.positions.items():
-            if position.quantity > 0 and symbol in current_prices:
-                total_unrealized += position.unrealized_pnl(current_prices[symbol])
+            if position.quantity > 0:
+                current_price = current_prices.get(symbol, position.avg_cost)
+                total_unrealized += position.unrealized_pnl(current_price)
         return total_unrealized
     
     def get_realized_pnl(self) -> float:
         """Calculate realized P&L from completed trades"""
-        # This is a simplified version - in practice, you'd track cost basis properly
-        buy_trades = [t for t in self.trades if t.side == OrderSide.BUY]
-        sell_trades = [t for t in self.trades if t.side == OrderSide.SELL]
+        # Track cost basis properly for realized gains/losses
+        symbol_cost_basis = {}
+        realized_pnl = 0.0
         
-        total_bought = sum(t.quantity * t.price for t in buy_trades)
-        total_sold = sum(t.quantity * t.price for t in sell_trades)
+        for trade in self.trades:
+            symbol = trade.symbol
+            
+            if symbol not in symbol_cost_basis:
+                symbol_cost_basis[symbol] = {'shares': 0, 'total_cost': 0.0}
+            
+            if trade.side.value == 'buy':  # Fix enum comparison
+                # Add to cost basis
+                symbol_cost_basis[symbol]['shares'] += trade.quantity
+                symbol_cost_basis[symbol]['total_cost'] += trade.quantity * trade.price
+            else:  # sell
+                # Calculate realized gain/loss
+                if symbol_cost_basis[symbol]['shares'] > 0:
+                    avg_cost = symbol_cost_basis[symbol]['total_cost'] / symbol_cost_basis[symbol]['shares']
+                    realized_pnl += (trade.price - avg_cost) * trade.quantity
+                    
+                    # Reduce cost basis
+                    symbol_cost_basis[symbol]['shares'] -= trade.quantity
+                    symbol_cost_basis[symbol]['total_cost'] -= avg_cost * trade.quantity
         
-        return total_sold - total_bought
+        return realized_pnl
     
     def get_positions_summary(self, current_prices: Dict[str, float]) -> Dict:
         """Get summary of all positions"""
@@ -103,13 +123,18 @@ class Portfolio:
         for symbol, position in self.positions.items():
             if position.quantity > 0:
                 current_price = current_prices.get(symbol, position.avg_cost)
+                market_value = position.quantity * current_price
+                unrealized_pnl = position.unrealized_pnl(current_price)
+                pnl_percent = (unrealized_pnl / (position.quantity * position.avg_cost) * 100) if position.avg_cost > 0 else 0
+                
                 summary[symbol] = {
                     'quantity': position.quantity,
                     'avg_cost': position.avg_cost,
                     'current_price': current_price,
-                    'market_value': position.current_market_value(current_price),
-                    'unrealized_pnl': position.unrealized_pnl(current_price),
-                    'pnl_percent': ((current_price - position.avg_cost) / position.avg_cost * 100) if position.avg_cost > 0 else 0
+                    'market_value': market_value,
+                    'cost_basis': position.quantity * position.avg_cost,
+                    'unrealized_pnl': unrealized_pnl,
+                    'pnl_percent': pnl_percent
                 }
         return summary
     

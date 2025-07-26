@@ -279,8 +279,17 @@ class BacktestRunner:
         self.engine.portfolio.cash = initial_balance
         self.engine.portfolio.initial_balance = initial_balance
         
-        # Add algorithm
+        # Clear any existing algorithm callbacks to prevent duplicates
+        self.engine.algorithm_callbacks.clear()
+        
+        # Add algorithm (this registers it with the engine)
         algorithm.activate()
+        
+        # Register the algorithm callback properly
+        def algorithm_callback(tick, patterns):
+            algorithm.on_tick(tick, patterns)
+        
+        self.engine.register_algorithm(algorithm_callback)
         
         start_time = datetime.now()
         

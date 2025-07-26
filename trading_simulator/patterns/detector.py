@@ -79,12 +79,9 @@ class PatternDetector:
         if len(candles) < 3:
             return patterns
             
-        # Look for flat top in last 3-4 candles and breakout in latest
-        for i in range(len(candles) - 2):
-            if i + 2 >= len(candles):
-                break
-                
-            c1, c2, c3 = candles[i:i+3]
+        # Only check the most recent possible pattern to avoid duplicates
+        if len(candles) >= 3:
+            c1, c2, c3 = candles[-3:]  # Only check last 3 candles
             
             if (self._is_flat_top(c1, c2) and 
                 c3.close > max(c1.high, c2.high) and
@@ -115,8 +112,9 @@ class PatternDetector:
         if len(candles) < 4:
             return patterns
             
-        for i in range(len(candles) - 3):
-            c0, c1, c2, c3 = candles[i:i+4]
+        # Only check the most recent possible pattern to avoid duplicates
+        if len(candles) >= 4:
+            c0, c1, c2, c3 = candles[-4:]  # Only check last 4 candles
             
             # Original pattern logic with enhancements
             breakout = c0.candle_type == CandleType.BULLISH
