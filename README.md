@@ -20,7 +20,7 @@ A modular, extensible stock trading simulation framework built in Python. Design
 ```bash
 # Clone the repository
 git clone https://github.com/tekuro-io/mjolnir-prime
-cd trading-simulator
+cd mjolnir-prime
 
 # Install in development mode
 pip install -e .
