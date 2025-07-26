@@ -1,5 +1,4 @@
-# ===== FILE: README.md =====
-# Trading Simulator
+# Mjolnir Trading Simulator: Truth in the Darkness
 
 ![Alt text](mjolnir.png)
 
