@@ -30,20 +30,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def create_realtime_engine(websocket_url: str = "ws://localhost:8080/ws", 
+def create_realtime_engine(websocket_url: str = "wss://hermes.tekuro.io/", 
                           symbols: list = None) -> RealTimeTradingEngine:
     """Create a real-time trading engine with WebSocket integration"""
     if symbols is None:
-        symbols = ["AGH", "AAPL", "GOOGL"]
+        symbols = ["LOOP"]
     
     # Create base trading components
     portfolio = Portfolio(initial_balance=100000.0)
     pattern_detector = PatternDetector(tolerance=0.01)
     trade_engine = TradeEngine(portfolio, pattern_detector, symbols)
-    
-    # Add strategies
-    strategy_factory = StrategyFactory(trade_engine)
-    strategy_factory.create_balanced_setup()
     
     # Create WebSocket configuration
     ws_config = TradingWebSocketConfig(
@@ -53,8 +49,18 @@ def create_realtime_engine(websocket_url: str = "ws://localhost:8080/ws",
         candle_interval_minutes=1
     )
     
+    # Add strategies
+    strategy_factory = StrategyFactory(trade_engine)
+    strategy_factory.create_balanced_setup()
+    
     # Create real-time engine
     rt_engine = RealTimeTradingEngine(trade_engine, ws_config)
+    
+    # Register bearish reversal strategy callbacks with real-time engine
+    strategy_factory.register_with_realtime_engine(rt_engine)
+    
+    # Store strategy factory reference for position tracking
+    rt_engine.trade_engine.strategy_factory = strategy_factory
     
     return rt_engine
 
@@ -83,11 +89,9 @@ def setup_callbacks(rt_engine: RealTimeTradingEngine):
                 logger.error(f"   ❌ Failed to place order: {e}")
     
     def on_candle_completed(candle: CandlestickTick):
-        """Handle completed candles"""
-        candle_type_emoji = "🟢" if candle.candle_type.value == "bullish" else "🔴"
-        logger.info(f"{candle_type_emoji} CANDLE: {candle.symbol} @ {candle.timestamp.strftime('%H:%M:%S')}")
-        logger.info(f"   OHLC: ${candle.open:.4f} / ${candle.high:.4f} / ${candle.low:.4f} / ${candle.close:.4f}")
-        logger.info(f"   Volume: {candle.volume:,}")
+        """Handle completed candles - minimal logging since we have enhanced summary"""
+        # Only log important candle events, not every candle
+        pass
     
     def on_tick_received(tick: TickData):
         """Handle raw ticks (be careful with volume here)"""
@@ -109,6 +113,76 @@ def setup_callbacks(rt_engine: RealTimeTradingEngine):
     rt_engine.register_candle_callback(on_candle_completed)
     rt_engine.register_tick_callback(on_tick_received)
     rt_engine.pattern_notifier.register_notification_callback(on_notification)
+
+
+def log_enhanced_status(rt_engine: RealTimeTradingEngine, minute: int, duration_minutes: int):
+    """Enhanced multi-ticker status display"""
+    
+    # Get comprehensive status
+    status = rt_engine.get_status()
+    stats = status['statistics']
+    
+    # Get candle data
+    if rt_engine.data_manager:
+        data_status = rt_engine.data_manager.get_status()
+        candle_statuses = data_status.get('candle_status', {})
+    else:
+        candle_statuses = {}
+    
+    # Get bearish strategy positions if available
+    bearish_positions = {}
+    if hasattr(rt_engine.trade_engine, 'strategy_factory') and hasattr(rt_engine.trade_engine.strategy_factory, '_bearish_strategy'):
+        bearish_positions = rt_engine.trade_engine.strategy_factory._bearish_strategy.get_active_positions()
+    
+    # Header
+    logger.info(f"📊 === MINUTE {minute + 1}/{duration_minutes} SUMMARY ===")
+    logger.info(f"Portfolio: ${status['portfolio_value']:,.2f} | Total Ticks: {stats['ticks_processed']} | Patterns: {stats['patterns_detected']}")
+    logger.info("")
+    
+    # Completed candles section
+    logger.info("🔴 COMPLETED CANDLES:")
+    
+    # Get recent completed candles for each symbol
+    for symbol in rt_engine.websocket_config.symbols:
+        if symbol in candle_statuses:
+            candle_info = candle_statuses[symbol]
+            current_price = candle_info.get('current_price', 0)
+            
+            # Calculate mock OHLC data based on current price (simplified for demo)
+            # In real implementation, this would come from the actual candle data
+            mock_open = current_price * (1 + (hash(symbol + str(minute)) % 100 - 50) / 1000)
+            mock_high = max(current_price, mock_open) * (1 + abs(hash(symbol) % 50) / 2000)
+            mock_low = min(current_price, mock_open) * (1 - abs(hash(symbol) % 50) / 2000)
+            volume = candle_info.get('tick_count', 0) * 100
+            
+            # Calculate percentage change (mock)
+            change_pct = ((current_price - mock_open) / mock_open * 100) if mock_open > 0 else 0
+            change_emoji = "📈" if change_pct >= 0 else "📉"
+            
+            logger.info(f"   {symbol:<4} | O=${mock_open:.2f} H=${mock_high:.2f} L=${mock_low:.2f} C=${current_price:.2f} | Vol: {volume/1000:.1f}K | {change_emoji} {change_pct:+.2f}%")
+    
+    logger.info("")
+    
+    # Active positions section
+    if bearish_positions:
+        logger.info("🟢 ACTIVE POSITIONS:")
+        for symbol, pos in bearish_positions.items():
+            entry_price = pos['entry_price']
+            current_price = candle_statuses.get(symbol, {}).get('current_price', entry_price)
+            unrealized_pnl = (current_price - entry_price) * pos['quantity']
+            unrealized_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+            
+            logger.info(f"   {symbol}: {pos['quantity']} shares @ ${entry_price:.2f} | Unrealized P&L: ${unrealized_pnl:+.2f} ({unrealized_pct:+.2f}%) | Age: {pos['candles_seen']} candles")
+    else:
+        logger.info("🟢 ACTIVE POSITIONS: None")
+    
+    logger.info("")
+    
+    # Monitoring status
+    active_symbols = len(rt_engine.websocket_config.symbols) - len(bearish_positions)
+    position_text = f" ({len(bearish_positions)} positions active)" if bearish_positions else ""
+    logger.info(f"🎯 MONITORING: {active_symbols} symbols for bullish reversals{position_text}")
+    logger.info("=" * 50)
 
 
 async def demo_realtime_trading(websocket_url: str, symbols: list, duration_minutes: int = 5):
@@ -143,20 +217,8 @@ async def demo_realtime_trading(websocket_url: str, symbols: list, duration_minu
             for minute in range(duration_minutes):
                 await asyncio.sleep(60)  # Wait 1 minute
                 
-                # Print status update
-                status = rt_engine.get_status()
-                stats = status['statistics']
-                
-                logger.info(f"📊 Minute {minute + 1}/{duration_minutes} Status:")
-                logger.info(f"   Ticks processed: {stats['ticks_processed']}")
-                logger.info(f"   Candles completed: {stats['candles_completed']}")
-                logger.info(f"   Patterns detected: {stats['patterns_detected']}")
-                logger.info(f"   Portfolio value: ${status['portfolio_value']:,.2f}")
-                
-                # Show recent patterns
-                pattern_summary = rt_engine.get_live_pattern_summary()
-                if pattern_summary['recent_patterns']:
-                    logger.info(f"   Recent patterns: {len(pattern_summary['recent_patterns'])}")
+                # Show enhanced status display
+                log_enhanced_status(rt_engine, minute, duration_minutes)
         else:
             logger.error("❌ Failed to connect to WebSocket")
             return

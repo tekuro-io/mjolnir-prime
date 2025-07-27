@@ -26,7 +26,7 @@ class RealTimeTradingEngine:
         self.websocket_client = None
         self.candle_aggregator = None
         self.data_manager = None
-        self.pattern_notifier = PatternNotifier()
+        self.pattern_notifier = PatternNotifier(websocket_config.url)
         
         # State
         self.is_running = False
@@ -178,6 +178,10 @@ class RealTimeTradingEngine:
         # Stop data processing
         if self.data_manager:
             self.data_manager.stop()
+        
+        # Close pattern notifier WebSocket connection
+        if self.pattern_notifier:
+            asyncio.create_task(self.pattern_notifier.close_websocket_connection())
         
         # Update uptime
         if self.start_time:

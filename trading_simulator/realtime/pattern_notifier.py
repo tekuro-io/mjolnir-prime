@@ -2,6 +2,9 @@
 Pattern detection notifications and alerts for real-time trading.
 """
 
+import json
+import asyncio
+import websockets
 from typing import Dict, List, Optional, Callable
 from datetime import datetime
 from dataclasses import dataclass
@@ -51,7 +54,7 @@ class PatternNotification:
 class PatternNotifier:
     """Manages pattern detection notifications and alerts"""
     
-    def __init__(self):
+    def __init__(self, websocket_url: Optional[str] = None):
         # Alert thresholds
         self.confidence_thresholds = {
             AlertLevel.LOW: 0.5,
@@ -75,6 +78,11 @@ class PatternNotifier:
         # Recent notifications for deduplication
         self.recent_notifications: List[PatternNotification] = []
         self.max_recent_notifications = 100
+        
+        # WebSocket publishing
+        self.websocket_url = websocket_url
+        self.websocket_connection = None
+        self.websocket_enabled = bool(websocket_url)
     
     def register_notification_callback(self, callback: Callable[[PatternNotification], None]):
         """Register callback for pattern notifications"""
@@ -103,6 +111,10 @@ class PatternNotifier:
         
         # Trigger callbacks
         self._trigger_notification_callbacks(notification)
+        
+        # Send WebSocket message if enabled
+        if self.websocket_enabled:
+            asyncio.create_task(self._send_websocket_detection(notification))
         
         return notification
     
@@ -232,3 +244,88 @@ class PatternNotifier:
     def set_pattern_priority(self, pattern_type: PatternType, alert_level: AlertLevel):
         """Set base alert level for pattern type"""
         self.pattern_priorities[pattern_type] = alert_level
+    
+    async def _send_websocket_detection(self, notification: PatternNotification):
+        """Send pattern detection message to WebSocket"""
+        if not self.websocket_enabled or not self.websocket_url:
+            return
+            
+        try:
+            # Format: topic
+            topic = "topic"
+            
+            message = {
+                "topic": topic,
+                "data": {
+                    "ticker": notification.symbol,
+                    "pattern": notification.pattern_type.value,
+                    "price": notification.trigger_price,
+                    "timestamp": notification.timestamp.isoformat(),
+                    "confidence": notification.confidence,
+                    "alert_level": notification.alert_level.value,
+                    "message": notification.message
+                }
+            }
+            
+            # Send message to WebSocket
+            if self.websocket_connection and not self._is_websocket_closed():
+                await self.websocket_connection.send(json.dumps(message))
+            else:
+                # Try to establish connection and send
+                await self._ensure_websocket_connection()
+                if self.websocket_connection and not self._is_websocket_closed():
+                    await self.websocket_connection.send(json.dumps(message))
+                    
+        except Exception as e:
+            print(f"Failed to send WebSocket detection message: {e}")
+    
+    async def _ensure_websocket_connection(self):
+        """Ensure WebSocket connection is established"""
+        if not self.websocket_url:
+            return
+            
+        try:
+            if not self.websocket_connection or self._is_websocket_closed():
+                self.websocket_connection = await websockets.connect(self.websocket_url)
+        except Exception as e:
+            print(f"Failed to connect to WebSocket for pattern notifications: {e}")
+            self.websocket_connection = None
+    
+    def set_websocket_url(self, url: str):
+        """Set or update WebSocket URL for pattern notifications"""
+        self.websocket_url = url
+        self.websocket_enabled = bool(url)
+        # Close existing connection to force reconnection with new URL
+        if self.websocket_connection and not self._is_websocket_closed():
+            asyncio.create_task(self.websocket_connection.close())
+            self.websocket_connection = None
+    
+    def _is_websocket_closed(self) -> bool:
+        """Check if WebSocket connection is closed, handling different websockets library versions"""
+        if not self.websocket_connection:
+            return True
+        
+        # Try different attributes that might exist depending on websockets library version
+        try:
+            # websockets >= 10.0
+            if hasattr(self.websocket_connection, 'closed'):
+                return self.websocket_connection.closed
+            # websockets < 10.0
+            elif hasattr(self.websocket_connection, 'close_code'):
+                return self.websocket_connection.close_code is not None
+            # websockets with state attribute
+            elif hasattr(self.websocket_connection, 'state'):
+                from websockets.protocol import State
+                return self.websocket_connection.state != State.OPEN
+            else:
+                # Default to False if we can't determine state
+                return False
+        except Exception:
+            # If any error occurs checking state, assume closed
+            return True
+    
+    async def close_websocket_connection(self):
+        """Close WebSocket connection"""
+        if self.websocket_connection and not self._is_websocket_closed():
+            await self.websocket_connection.close()
+            self.websocket_connection = None
