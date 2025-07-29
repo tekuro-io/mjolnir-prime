@@ -50,7 +50,10 @@ class LiveConfig:
         if self.symbols is None:
             self.symbols = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'GOOGL', 'AMZN', 'META', 'UBER', 'ROKU']
         if self.pattern_types is None:
-            self.pattern_types = [PatternType.BULLISH_REVERSAL, PatternType.BEARISH_REVERSAL]
+            self.pattern_types = [PatternType.BULLISH_REVERSAL, PatternType.BEARISH_REVERSAL, 
+                                PatternType.FLAT_TOP_BREAKOUT, PatternType.DOUBLE_TOP,
+                                PatternType.DOUBLE_BOTTOM, PatternType.BULL_FLAG, 
+                                PatternType.BEAR_FLAG]
 
 
 class LivePatternDetector:
@@ -139,7 +142,12 @@ class LivePatternDetector:
         if not self.config.broadcast_enabled or not self.broadcast_clients:
             return
         
-        # Create pattern message in standard format
+        # Create pattern message in standard format (same as k8s_pattern_detector)
+        # Get the trigger candle for candle_data
+        trigger_candle = None
+        if pattern.candles_involved:
+            trigger_candle = pattern.candles_involved[-1]  # Use last candle as trigger
+        
         pattern_msg = {
             "type": "pattern_detected",
             "data": {
@@ -149,11 +157,11 @@ class LivePatternDetector:
                 "trigger_price": round(pattern.trigger_price, 2),
                 "timestamp": pattern.timestamp.isoformat(),
                 "candle_data": {
-                    "open": round(pattern.candle_data.open if pattern.candle_data else 0, 2),
-                    "high": round(pattern.candle_data.high if pattern.candle_data else 0, 2),
-                    "low": round(pattern.candle_data.low if pattern.candle_data else 0, 2),
-                    "close": round(pattern.candle_data.close if pattern.candle_data else 0, 2),
-                    "volume": pattern.candle_data.volume if pattern.candle_data else 0
+                    "open": round(trigger_candle.open if trigger_candle else pattern.trigger_price, 2),
+                    "high": round(trigger_candle.high if trigger_candle else pattern.trigger_price, 2),
+                    "low": round(trigger_candle.low if trigger_candle else pattern.trigger_price, 2),
+                    "close": round(trigger_candle.close if trigger_candle else pattern.trigger_price, 2),
+                    "volume": trigger_candle.volume if trigger_candle else 0
                 },
                 "source": "live_polygon_data"
             }
@@ -313,21 +321,22 @@ class LivePatternDetector:
             # Use the last few candles for pattern detection
             recent_candles = candles[-50:]  # Look at last 50 candles
             
-            # Run pattern detection
-            for pattern_type in self.config.pattern_types:
-                matches = self.pattern_detector.detect_patterns(recent_candles, pattern_type)
-                
-                # Filter by confidence
-                high_confidence_matches = [
-                    match for match in matches 
-                    if match.confidence >= self.config.min_confidence
-                ]
-                
-                # Trigger callbacks for new patterns
-                for match in high_confidence_matches:
-                    # Check if this is a new pattern (not detected in last few minutes)
-                    if self._is_new_pattern(match):
-                        self.pattern_detector._trigger_pattern_callbacks(pattern_type, match)
+            # Sync our candle history to the pattern detector and run detection
+            # Clear the pattern detector's history for this symbol to avoid duplicates
+            if symbol in self.pattern_detector.candle_history:
+                self.pattern_detector.candle_history[symbol].clear()
+            
+            # Add all recent candles to pattern detector (it maintains its own history)
+            for candle in recent_candles:
+                detected_patterns = self.pattern_detector.add_candle(candle)
+                # Only process patterns from the latest candle to avoid duplicates
+                if candle == recent_candles[-1]:
+                    for pattern in detected_patterns:
+                        # Check if this is a new pattern and meets confidence threshold
+                        if (pattern.confidence >= self.config.min_confidence and 
+                            self._is_new_pattern(pattern)):
+                            # Pattern callbacks are automatically triggered by add_candle
+                            pass
             
         except Exception as e:
             self.logger.error(f"Pattern detection error for {symbol}: {e}")

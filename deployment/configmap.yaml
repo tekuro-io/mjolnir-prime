@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mjolnir-config
+  namespace: stock
+  labels:
+    app: mjolnir-pattern-detector
+data:
+  # WebSocket Configuration
+  WEBSOCKET_URL: "ws://hermes.tekuro.io"  # Production WebSocket server

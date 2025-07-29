@@ -1,8 +1,3 @@
-# Requirements for live pattern detection tool
+# Requirements for k8s pattern detection service  
 websockets>=11.0.3
-python-polygon-io>=1.12.0
-asyncio
-logging
-dataclasses
-datetime
-typing
+redis>=4.5.0

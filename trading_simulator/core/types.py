@@ -40,3 +40,5 @@ class PatternType(Enum):
     DOUBLE_BOTTOM = "double_bottom"
     ASCENDING_TRIANGLE = "ascending_triangle"
     DESCENDING_TRIANGLE = "descending_triangle"
+    BULL_FLAG = "bull_flag"
+    BEAR_FLAG = "bear_flag"

@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mjolnir-pattern-detector
+  namespace: stock
+  labels:
+    app: mjolnir-pattern-detector
+    version: v1.0.0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mjolnir-pattern-detector
+  template:
+    metadata:
+      labels:
+        app: mjolnir-pattern-detector
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      containers:
+      - name: pattern-detector
+        image: artifacts.tekuro.io/mjolnir:latest
+        imagePullPolicy: Always
+        env:
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: stock-poller-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: stock-poller-config
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis
+              key: redis-password
+        - name: WEBSOCKET_URL
+          valueFrom:
+            configMapKeyRef:
+              name: mjolnir-config
+              key: WEBSOCKET_URL
+        - name: ENVIRONMENT
+          value: "production"  # Set to "development" for non-prod deployments
+        - name: STOCK_LIST_KEY
+          value: "scanner:latest"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
