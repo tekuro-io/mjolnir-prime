@@ -1,0 +1,14 @@
+2025-07-28 11:19:34,485 - INFO - server listening on 127.0.0.1:8765
+2025-07-28 11:19:34,485 - INFO - server listening on [::1]:8765
+2025-07-28 11:19:34,503 - INFO - Connecting to Polygon.io websocket...
+2025-07-28 11:19:34,779 - INFO - server closing
+2025-07-28 11:19:34,779 - INFO - server closed
+2025-07-28 11:20:33,594 - INFO - server listening on 127.0.0.1:8765
+2025-07-28 11:20:33,595 - INFO - server listening on [::1]:8765
+2025-07-28 11:20:33,595 - INFO - [BROADCAST] Pattern broadcast server started on ws://localhost:8765
+2025-07-28 11:20:33,595 - INFO - Connecting to Polygon.io websocket...
+2025-07-28 11:20:33,766 - ERROR - [ERROR] Connection failed: 'list' object has no attribute 'get'
+2025-07-28 11:20:33,794 - INFO - [DISCONNECT] Disconnected
+2025-07-28 11:20:33,794 - INFO - server closing
+2025-07-28 11:20:33,795 - INFO - server closed
+2025-07-28 11:20:33,795 - INFO - [BROADCAST] Broadcast server stopped
