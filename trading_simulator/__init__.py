@@ -20,11 +20,11 @@ from .trading.engine import TradeEngine
 from .patterns.detector import PatternDetector
 from .patterns.strategies import PatternStrategies, StrategyFactory
 from .algorithms.base import TradingAlgorithm, AlgorithmManager, BacktestRunner
-from .data.mock_data import JsonTickLoader, MockDataGenerator
-from .data.websocket_client import WebSocketClient, WebSocketConfig, TickData
-from .data.candle_aggregator import CandleAggregator, RealTimeDataManager
-from .config.websocket_config import TradingWebSocketConfig
-from .realtime.trading_engine import RealTimeTradingEngine
+from .data.loaders import JsonTickLoader, MockDataGenerator
+# from .data.websocket_client import WebSocketClient, WebSocketConfig, TickData  # Module not found
+# from .data.candle_aggregator import CandleAggregator, RealTimeDataManager  # Module not found
+# from .config.websocket_config import TradingWebSocketConfig  # Module has missing dependencies
+# from .realtime.trading_engine import RealTimeTradingEngine  # Module has missing dependencies
 from .realtime.pattern_notifier import PatternNotifier
 
 # Convenience factory functions
@@ -45,26 +45,26 @@ def create_demo_setup():
     factory.create_balanced_setup()
     return engine, factory
 
-def create_realtime_engine(websocket_url: str, symbols: list = None, 
-                          initial_balance: float = 100000.0, 
-                          pattern_tolerance: float = 0.01) -> RealTimeTradingEngine:
-    """Create a real-time trading engine with WebSocket integration"""
-    if symbols is None:
-        symbols = ['AAPL', 'GOOGL', 'MSFT']
-    
-    # Create base engine
-    engine = create_engine(initial_balance, symbols, pattern_tolerance)
-    
-    # Create WebSocket configuration
-    ws_config = TradingWebSocketConfig(
-        url=websocket_url,
-        symbols=symbols,
-        enable_pattern_detection=True,
-        candle_interval_minutes=1
-    )
-    
-    # Create real-time engine
-    return RealTimeTradingEngine(engine, ws_config)
+# def create_realtime_engine(websocket_url: str, symbols: list = None, 
+#                           initial_balance: float = 100000.0, 
+#                           pattern_tolerance: float = 0.01) -> RealTimeTradingEngine:
+#     """Create a real-time trading engine with WebSocket integration"""
+#     if symbols is None:
+#         symbols = ['AAPL', 'GOOGL', 'MSFT']
+#     
+#     # Create base engine
+#     engine = create_engine(initial_balance, symbols, pattern_tolerance)
+#     
+#     # Create WebSocket configuration
+#     ws_config = TradingWebSocketConfig(
+#         url=websocket_url,
+#         symbols=symbols,
+#         enable_pattern_detection=True,
+#         candle_interval_minutes=1
+#     )
+#     
+#     # Create real-time engine
+#     return RealTimeTradingEngine(engine, ws_config)
 
 __all__ = [
     # Core types
@@ -79,9 +79,11 @@ __all__ = [
     # Data handling
     'JsonTickLoader', 'MockDataGenerator',
     # WebSocket and real-time
-    'WebSocketClient', 'WebSocketConfig', 'TickData',
-    'CandleAggregator', 'RealTimeDataManager', 'TradingWebSocketConfig',
-    'RealTimeTradingEngine', 'PatternNotifier',
+    # 'WebSocketClient', 'WebSocketConfig', 'TickData',  # Module not found
+    # 'CandleAggregator', 'RealTimeDataManager',  # Module not found
+    # 'TradingWebSocketConfig',  # Module has missing dependencies
+    # 'RealTimeTradingEngine',  # Module has missing dependencies
+    'PatternNotifier',
     # Convenience functions
-    'create_engine', 'create_demo_setup', 'create_realtime_engine'
+    'create_engine', 'create_demo_setup'  # , 'create_realtime_engine'  # Function disabled due to missing dependencies
 ]

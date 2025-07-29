@@ -25,6 +25,9 @@ class PatternDetector:
         self.candle_history: Dict[str, deque] = {}
         self.pattern_callbacks: Dict[PatternType, List[Callable]] = {}
         
+        # Track alerted patterns to prevent spam
+        self.alerted_patterns: Dict[str, Dict] = {}  # symbol -> {pattern_type: timestamp}
+        
     def add_candle(self, candle: CandlestickTick) -> List[PatternMatch]:
         """Add new candle and detect patterns"""
         if not isinstance(candle, CandlestickTick):
@@ -61,9 +64,31 @@ class PatternDetector:
         self.pattern_callbacks[pattern_type].append(callback)
     
     def _trigger_callbacks(self, pattern: PatternMatch):
-        """Trigger registered callbacks for detected pattern"""
-        if pattern.pattern_type in self.pattern_callbacks:
-            for callback in self.pattern_callbacks[pattern.pattern_type]:
+        """Trigger registered callbacks for detected pattern (with spam prevention)"""
+        symbol = pattern.symbol
+        pattern_type = pattern.pattern_type
+        
+        # Initialize symbol tracking if needed
+        if symbol not in self.alerted_patterns:
+            self.alerted_patterns[symbol] = {}
+        
+        # Check if we've already alerted for this pattern type recently
+        cooldown_minutes = 30  # Don't re-alert same pattern for 30 minutes
+        current_time = pattern.timestamp
+        
+        if pattern_type in self.alerted_patterns[symbol]:
+            last_alert_time = self.alerted_patterns[symbol][pattern_type]
+            time_diff = (current_time - last_alert_time).total_seconds() / 60
+            
+            if time_diff < cooldown_minutes:
+                return  # Skip this alert - too soon since last one
+        
+        # Record this alert
+        self.alerted_patterns[symbol][pattern_type] = current_time
+        
+        # Trigger callbacks
+        if pattern_type in self.pattern_callbacks:
+            for callback in self.pattern_callbacks[pattern_type]:
                 try:
                     callback(pattern)
                 except Exception as e:
@@ -72,6 +97,43 @@ class PatternDetector:
     def _is_flat_top(self, c1: CandlestickTick, c2: CandlestickTick) -> bool:
         """Check if two candles form a flat top with tolerance"""
         return abs(c1.high - c2.high) <= self.tolerance
+    
+    def _is_consolidating(self, flag_candles: List[CandlestickTick], flag_len: int) -> bool:
+        """Check if flag candles show consolidation (flattening) rather than continuous decline"""
+        if flag_len < 5:
+            return False  # Need at least 5 minutes to confirm consolidation
+        
+        # Split flag into first half and second half
+        mid_point = flag_len // 2
+        first_half = flag_candles[:mid_point] if mid_point > 0 else [flag_candles[0]]
+        second_half = flag_candles[mid_point:] if mid_point < flag_len else [flag_candles[-1]]
+        
+        # Calculate average price for each half
+        first_half_avg = sum(c.close for c in first_half) / len(first_half)
+        second_half_avg = sum(c.close for c in second_half) / len(second_half)
+        
+        # Calculate slope (decline rate) - negative means still declining
+        slope = (second_half_avg - first_half_avg) / first_half_avg
+        
+        # Consolidation requirements:
+        # 1. Slope should be gentle (not steep decline) - less than 2% decline in second half
+        # 2. OR actually flattening/rising slightly
+        gentle_slope = slope > -0.02  # Less than 2% decline from first to second half
+        
+        # Additional check: Look at volatility - consolidation should have lower volatility in later stages
+        if len(second_half) >= 3:
+            # Check if recent candles are showing sideways movement
+            recent_candles = flag_candles[-min(3, flag_len):]  # Last 3 candles or fewer
+            recent_high = max(c.high for c in recent_candles)
+            recent_low = min(c.low for c in recent_candles)
+            recent_range = (recent_high - recent_low) / recent_high
+            
+            # Recent range should be tight (indicating consolidation, not sharp moves)
+            tight_recent_range = recent_range < 0.03  # Less than 3% range in recent candles
+            
+            return gentle_slope and tight_recent_range
+        
+        return gentle_slope
     
     def _detect_flat_top_breakout(self, symbol: str) -> List[PatternMatch]:
         """Detect flat top breakout pattern"""
@@ -214,65 +276,87 @@ class PatternDetector:
         return patterns
     
     def _detect_bull_flag(self, symbol: str) -> List[PatternMatch]:
-        """Detect bull flag pattern: strong upward move, consolidation, breakout"""
+        """Detect bull flag pattern: strong upward move, consolidation, setup complete"""
         candles = list(self.candle_history[symbol])
         patterns = []
         
-        if len(candles) < 15:  # Need more history for bull flag
+        if len(candles) < 8:  # Minimum: 3 flagpole + 5 flag = 8 candles
             return patterns
         
-        # Look for bull flag patterns in recent candles
-        for i in range(len(candles) - 10):
-            window = candles[i:i+15] if i+15 <= len(candles) else candles[i:]
-            if len(window) < 10:
-                continue
+        # Live streaming detection - check if current state forms a bull flag
+        # Try different flagpole lengths but always end at current candle
+        
+        for flagpole_len in range(3, min(13, len(candles) - 5 + 1)):  # 3-12 candle flagpoles
+            for flag_len in range(5, min(16, len(candles) - flagpole_len + 1)):  # 5-15 candle flags (minimum 5 minutes)
+                total_pattern_len = flagpole_len + flag_len
                 
-            # Phase 1: Find flagpole (strong upward move)
-            flagpole_candles = window[:5]  # First 5 candles for flagpole
-            flagpole_start = flagpole_candles[0].low
-            flagpole_end = flagpole_candles[-1].high
-            flagpole_gain = (flagpole_end - flagpole_start) / flagpole_start
-            
-            # Must have significant gain (at least 8%)
-            if flagpole_gain < 0.08:
-                continue
-            
-            # Phase 2: Find consolidation/flag (pullback and sideways movement)
-            flag_candles = window[5:10]  # Next 5 candles for flag
-            flag_high = max(c.high for c in flag_candles)
-            flag_low = min(c.low for c in flag_candles)
-            flag_range = (flag_high - flag_low) / flag_high
-            
-            # Flag should pullback 23.6% to 61.8% of flagpole gain
-            pullback_amount = (flagpole_end - flag_low) / (flagpole_end - flagpole_start)
-            if not (0.236 <= pullback_amount <= 0.618):
-                continue
-                
-            # Flag should be relatively narrow (consolidation)
-            if flag_range > 0.10:  # More than 10% range is too wide
-                continue
-            
-            # Phase 3: Check for breakout
-            if len(window) >= 12:
-                breakout_candles = window[10:12]
-                breakout_candle = breakout_candles[-1]
-                
-                # Breakout above flag high with volume
-                if (breakout_candle.close > flag_high and 
-                    breakout_candle.candle_type == CandleType.BULLISH):
+                # Make sure we have enough candles
+                if total_pattern_len > len(candles):
+                    continue
                     
-                    confidence = self._calculate_bull_flag_confidence(
-                        flagpole_candles, flag_candles, breakout_candle, 
-                        flagpole_gain, pullback_amount, flag_range
-                    )
+                # Always look at the most recent pattern ending NOW (at current candle)
+                start_idx = len(candles) - total_pattern_len
+                flagpole_candles = candles[start_idx:start_idx + flagpole_len]
+                flag_candles = candles[start_idx + flagpole_len:start_idx + total_pattern_len]
+                
+                # Phase 1: Validate flagpole (strong upward move)
+                flagpole_start = min(c.low for c in flagpole_candles)
+                flagpole_end = max(c.high for c in flagpole_candles)
+                flagpole_gain = (flagpole_end - flagpole_start) / flagpole_start
+                
+                # Must have significant gain (scale requirement with flagpole length)
+                min_gain = max(0.06, 0.08 - (flagpole_len - 5) * 0.005)  # 6-8% depending on length
+                if flagpole_gain < min_gain:
+                    continue
                     
+                # Check that flagpole shows general upward progression
+                flagpole_start_price = flagpole_candles[0].open
+                flagpole_end_price = flagpole_candles[-1].close
+                if flagpole_end_price <= flagpole_start_price * 1.02:  # At least 2% net gain
+                    continue
+                
+                # Phase 2: Validate flag (consolidation after flagpole)
+                flag_high = max(c.high for c in flag_candles)
+                flag_low = min(c.low for c in flag_candles)
+                flag_range = (flag_high - flag_low) / flag_high
+                
+                # Flag should pullback 23.6% to 61.8% of flagpole gain
+                pullback_amount = (flagpole_end - flag_low) / (flagpole_end - flagpole_start)
+                if not (0.15 <= pullback_amount <= 0.75):  # More flexible than strict Fibonacci
+                    continue
+                    
+                # Flag should be relatively narrow (consolidation)
+                # Scale requirement with flag length - longer flags can be slightly wider
+                max_range = min(0.12, 0.08 + (flag_len - 5) * 0.005)
+                if flag_range > max_range:
+                    continue
+                    
+                # Flag should not make new highs beyond flagpole (with small tolerance)
+                if flag_high > flagpole_end * 1.02:  # Allow 2% tolerance
+                    continue
+                
+                # NEW: Require actual consolidation - flag must flatten out, not just pullback
+                if not self._is_consolidating(flag_candles, flag_len):
+                    continue
+                
+                # Phase 3: Bull flag setup is complete - trigger for actionable trading
+                trigger_candle = flag_candles[-1]
+                
+                # Calculate confidence based on setup quality and pattern characteristics
+                confidence = self._calculate_flexible_bull_flag_confidence(
+                    flagpole_candles, flag_candles, flagpole_gain, pullback_amount, 
+                    flag_range, flagpole_len, flag_len
+                )
+                
+                # Only add high-quality patterns to avoid duplicates
+                if confidence >= 0.6:
                     patterns.append(PatternMatch(
                         pattern_type=PatternType.BULL_FLAG,
                         confidence=confidence,
-                        timestamp=breakout_candle.timestamp,
+                        timestamp=trigger_candle.timestamp,
                         symbol=symbol,
-                        trigger_price=breakout_candle.close,
-                        candles_involved=flagpole_candles + flag_candles + [breakout_candle],
+                        trigger_price=trigger_candle.close,
+                        candles_involved=flagpole_candles + flag_candles,
                         metadata={
                             'flagpole_gain': flagpole_gain,
                             'pullback_ratio': pullback_amount,
@@ -280,10 +364,17 @@ class PatternDetector:
                             'flag_high': flag_high,
                             'flag_low': flag_low,
                             'flagpole_start': flagpole_start,
-                            'flagpole_end': flagpole_end
+                            'flagpole_end': flagpole_end,
+                            'flagpole_length': flagpole_len,
+                            'flag_length': flag_len,
+                            'breakout_target': flag_high,
+                            'setup_type': 'pre_breakout'
                         }
                     ))
         
+        # Return only the highest confidence pattern to avoid duplicates
+        if patterns:
+            return [max(patterns, key=lambda p: p.confidence)]
         return patterns
     
     def _detect_bear_flag(self, symbol: str) -> List[PatternMatch]:
@@ -325,37 +416,37 @@ class PatternDetector:
             if flag_range > 0.10:  # More than 10% range is too wide
                 continue
             
-            # Phase 3: Check for breakdown
-            if len(window) >= 12:
-                breakdown_candles = window[10:12]
-                breakdown_candle = breakdown_candles[-1]
-                
-                # Breakdown below flag low with volume
-                if (breakdown_candle.close < flag_low and 
-                    breakdown_candle.candle_type == CandleType.BEARISH):
-                    
-                    confidence = self._calculate_bear_flag_confidence(
-                        flagpole_candles, flag_candles, breakdown_candle, 
-                        flagpole_decline, retrace_amount, flag_range
-                    )
-                    
-                    patterns.append(PatternMatch(
-                        pattern_type=PatternType.BEAR_FLAG,
-                        confidence=confidence,
-                        timestamp=breakdown_candle.timestamp,
-                        symbol=symbol,
-                        trigger_price=breakdown_candle.close,
-                        candles_involved=flagpole_candles + flag_candles + [breakdown_candle],
-                        metadata={
-                            'flagpole_decline': flagpole_decline,
-                            'retrace_ratio': retrace_amount,
-                            'flag_range': flag_range,
-                            'flag_high': flag_high,
-                            'flag_low': flag_low,
-                            'flagpole_start': flagpole_start,
-                            'flagpole_end': flagpole_end
-                        }
-                    ))
+            # Phase 3: Bear flag setup is complete - trigger BEFORE breakdown for actionable trading
+            # We have: flagpole (strong decline) + flag (consolidation) = ready for potential breakdown
+            
+            # Use the last flag candle as the trigger point  
+            trigger_candle = flag_candles[-1]
+            
+            # Calculate confidence based on setup quality (not breakdown confirmation)
+            confidence = self._calculate_bear_flag_setup_confidence(
+                flagpole_candles, flag_candles, 
+                flagpole_decline, retrace_amount, flag_range
+            )
+            
+            patterns.append(PatternMatch(
+                pattern_type=PatternType.BEAR_FLAG,
+                confidence=confidence,
+                timestamp=trigger_candle.timestamp,
+                symbol=symbol,
+                trigger_price=trigger_candle.close,
+                candles_involved=flagpole_candles + flag_candles,
+                metadata={
+                    'flagpole_decline': flagpole_decline,
+                    'retrace_ratio': retrace_amount,
+                    'flag_range': flag_range,
+                    'flag_high': flag_high,
+                    'flag_low': flag_low,
+                    'flagpole_start': flagpole_start,
+                    'flagpole_end': flagpole_end,
+                    'breakdown_target': flag_low,  # Price level to watch for breakdown
+                    'setup_type': 'pre_breakdown'   # Indicates this is setup detection, not confirmation
+                }
+            ))
         
         return patterns
     
@@ -480,6 +571,141 @@ class PatternDetector:
             if c2.high != c0.low:
                 breakdown_ratio = (c2.high - c3.close) / (c2.high - c0.low)
                 base_confidence += min(breakdown_ratio * 0.2, 0.2)
+        
+        return min(base_confidence, 1.0)
+    
+    def _calculate_bull_flag_setup_confidence(self, flagpole_candles: List[CandlestickTick], 
+                                            flag_candles: List[CandlestickTick],
+                                            flagpole_gain: float, pullback_ratio: float, 
+                                            flag_range: float) -> float:
+        """Calculate confidence for bull flag setup (before breakout)"""
+        base_confidence = 0.6  # Start with reasonable base for valid setup
+        
+        # Flagpole strength (stronger flagpole = higher confidence)
+        if flagpole_gain >= 0.15:  # 15%+ gain
+            base_confidence += 0.2
+        elif flagpole_gain >= 0.10:  # 10-15% gain
+            base_confidence += 0.1
+        # 8-10% is minimum, no bonus
+        
+        # Ideal pullback ratio (38.2% - 50% is ideal for bull flags)
+        if 0.382 <= pullback_ratio <= 0.50:
+            base_confidence += 0.15  # Perfect Fibonacci zone
+        elif 0.236 <= pullback_ratio <= 0.382 or 0.50 <= pullback_ratio <= 0.618:
+            base_confidence += 0.05  # Acceptable zones
+        
+        # Tight consolidation (smaller range = better flag)
+        if flag_range <= 0.03:  # Very tight 3%
+            base_confidence += 0.1
+        elif flag_range <= 0.05:  # Tight 5%
+            base_confidence += 0.05
+        # 5-10% gets no bonus but is acceptable
+        
+        # Volume pattern (flagpole should have higher volume than flag)
+        flagpole_avg_volume = sum(c.volume for c in flagpole_candles) / len(flagpole_candles)
+        flag_avg_volume = sum(c.volume for c in flag_candles) / len(flag_candles) 
+        
+        if flagpole_avg_volume > flag_avg_volume * 1.5:  # Strong volume decline in flag
+            base_confidence += 0.1
+        elif flagpole_avg_volume > flag_avg_volume:  # Some volume decline
+            base_confidence += 0.05
+        
+        return min(base_confidence, 1.0)
+    
+    def _calculate_flexible_bull_flag_confidence(self, flagpole_candles: List[CandlestickTick], 
+                                               flag_candles: List[CandlestickTick],
+                                               flagpole_gain: float, pullback_ratio: float, 
+                                               flag_range: float, flagpole_len: int, flag_len: int) -> float:
+        """Calculate confidence for flexible bull flag patterns"""
+        base_confidence = 0.5  # Start lower since we're more flexible
+        
+        # Flagpole strength (stronger flagpole = higher confidence)
+        if flagpole_gain >= 0.15:  # 15%+ gain
+            base_confidence += 0.25
+        elif flagpole_gain >= 0.10:  # 10-15% gain
+            base_confidence += 0.15
+        elif flagpole_gain >= 0.08:  # 8-10% gain
+            base_confidence += 0.10
+        # 6-8% gets base confidence only
+        
+        # Ideal pullback ratio (38.2% - 50% is ideal)
+        if 0.382 <= pullback_ratio <= 0.50:
+            base_confidence += 0.15  # Perfect Fibonacci zone
+        elif 0.236 <= pullback_ratio <= 0.382 or 0.50 <= pullback_ratio <= 0.618:
+            base_confidence += 0.10  # Good zones
+        elif 0.15 <= pullback_ratio <= 0.236 or 0.618 <= pullback_ratio <= 0.75:
+            base_confidence += 0.05  # Acceptable zones
+        
+        # Tight consolidation (smaller range = better flag)
+        if flag_range <= 0.03:  # Very tight 3%
+            base_confidence += 0.10
+        elif flag_range <= 0.05:  # Tight 5%
+            base_confidence += 0.08
+        elif flag_range <= 0.08:  # Reasonable 8%
+            base_confidence += 0.05
+        # Above 8% gets no bonus
+        
+        # Pattern proportions (ideal flagpole:flag ratios)
+        ratio = flagpole_len / flag_len
+        if 0.4 <= ratio <= 1.5:  # Good proportions (flagpole roughly same as flag)
+            base_confidence += 0.05
+        elif 0.2 <= ratio <= 2.5:  # Acceptable proportions
+            base_confidence += 0.02
+        
+        # Pattern length bonus (not too short, not too long)
+        total_len = flagpole_len + flag_len
+        if 8 <= total_len <= 15:  # Sweet spot
+            base_confidence += 0.03
+        elif 6 <= total_len <= 20:  # Acceptable
+            base_confidence += 0.01
+        
+        # Volume pattern (flagpole should have higher volume than flag)
+        if len(flagpole_candles) > 0 and len(flag_candles) > 0:
+            flagpole_avg_volume = sum(c.volume for c in flagpole_candles) / len(flagpole_candles)
+            flag_avg_volume = sum(c.volume for c in flag_candles) / len(flag_candles) 
+            
+            if flagpole_avg_volume > flag_avg_volume * 1.5:  # Strong volume decline in flag
+                base_confidence += 0.08
+            elif flagpole_avg_volume > flag_avg_volume:  # Some volume decline
+                base_confidence += 0.05
+        
+        return min(base_confidence, 1.0)
+    
+    def _calculate_bear_flag_setup_confidence(self, flagpole_candles: List[CandlestickTick], 
+                                            flag_candles: List[CandlestickTick],
+                                            flagpole_decline: float, retrace_ratio: float, 
+                                            flag_range: float) -> float:
+        """Calculate confidence for bear flag setup (before breakdown)"""
+        base_confidence = 0.6  # Start with reasonable base for valid setup
+        
+        # Flagpole strength (stronger decline = higher confidence)
+        if flagpole_decline >= 0.15:  # 15%+ decline
+            base_confidence += 0.2
+        elif flagpole_decline >= 0.10:  # 10-15% decline
+            base_confidence += 0.1
+        # 8-10% is minimum, no bonus
+        
+        # Ideal retrace ratio (38.2% - 50% is ideal for bear flags)
+        if 0.382 <= retrace_ratio <= 0.50:
+            base_confidence += 0.15  # Perfect Fibonacci zone
+        elif 0.236 <= retrace_ratio <= 0.382 or 0.50 <= retrace_ratio <= 0.618:
+            base_confidence += 0.05  # Acceptable zones
+        
+        # Tight consolidation (smaller range = better flag)
+        if flag_range <= 0.03:  # Very tight 3%
+            base_confidence += 0.1
+        elif flag_range <= 0.05:  # Tight 5%
+            base_confidence += 0.05
+        # 5-10% gets no bonus but is acceptable
+        
+        # Volume pattern (flagpole should have higher volume than flag)
+        flagpole_avg_volume = sum(c.volume for c in flagpole_candles) / len(flagpole_candles)
+        flag_avg_volume = sum(c.volume for c in flag_candles) / len(flag_candles) 
+        
+        if flagpole_avg_volume > flag_avg_volume * 1.5:  # Strong volume decline in flag
+            base_confidence += 0.1
+        elif flagpole_avg_volume > flag_avg_volume:  # Some volume decline
+            base_confidence += 0.05
         
         return min(base_confidence, 1.0)
     
