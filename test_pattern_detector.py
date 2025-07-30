@@ -32,12 +32,11 @@ def tick_to_candle(tick_data, symbol):
     )
 
 def aggregate_to_minute_candles(ticks, symbol):
-    """Aggregate tick data into 1-minute candles with realistic OHLC variation"""
+    """Aggregate tick data into 1-minute candles"""
     candles = []
     current_candle = None
-    prev_tick_price = None
     
-    for i, tick in enumerate(ticks):
+    for tick in ticks:
         timestamp = datetime.fromtimestamp(tick['timestamp'] / 1000)
         minute_timestamp = timestamp.replace(second=0, microsecond=0)
         price = tick['price']
@@ -46,50 +45,13 @@ def aggregate_to_minute_candles(ticks, symbol):
         if current_candle is None or current_candle['timestamp'] != minute_timestamp:
             # Complete previous candle
             if current_candle:
-                # Add small variation to create proper OHLC candles
-                base_price = current_candle['close']
-                variation = base_price * 0.002  # 0.2% variation
-                
-                # For bullish candles (price going up)
-                if current_candle['close'] > current_candle['open']:
-                    high = current_candle['close'] + variation * 0.5
-                    low = current_candle['open'] - variation * 0.3
-                    open_price = current_candle['open']
-                    close_price = current_candle['close']
-                # For bearish candles (price going down)  
-                elif current_candle['close'] < current_candle['open']:
-                    high = current_candle['open'] + variation * 0.3
-                    low = current_candle['close'] - variation * 0.5
-                    open_price = current_candle['open']
-                    close_price = current_candle['close']
-                # For DOJI candles (same price) - use actual price direction from previous tick
-                else:
-                    # Use previous tick price to determine direction
-                    if prev_tick_price is not None and prev_tick_price != base_price:
-                        # Use actual price movement direction
-                        if base_price > prev_tick_price:
-                            # Rising - make bullish
-                            open_price = base_price - variation * 0.1
-                            close_price = base_price + variation * 0.1
-                        else:
-                            # Falling - make bearish  
-                            open_price = base_price + variation * 0.1
-                            close_price = base_price - variation * 0.1
-                    else:
-                        # No direction info - small bullish
-                        open_price = base_price - variation * 0.05
-                        close_price = base_price + variation * 0.05
-                    
-                    high = max(open_price, close_price) + variation * 0.2
-                    low = min(open_price, close_price) - variation * 0.2
-                
                 candles.append(CandlestickTick(
                     symbol=symbol,
                     timestamp=current_candle['timestamp'],
-                    open=round(open_price, 2),
-                    high=round(high, 2),
-                    low=round(low, 2),
-                    close=round(close_price, 2),
+                    open=current_candle['open'],
+                    high=current_candle['high'],
+                    low=current_candle['low'],
+                    close=current_candle['close'],
                     volume=current_candle['volume']
                 ))
             
@@ -102,8 +64,6 @@ def aggregate_to_minute_candles(ticks, symbol):
                 'close': price,
                 'volume': volume
             }
-            # Update previous tick price for direction determination
-            prev_tick_price = ticks[i-1]['price'] if i > 0 else None
         else:
             # Update current candle
             current_candle['high'] = max(current_candle['high'], price)
@@ -113,33 +73,13 @@ def aggregate_to_minute_candles(ticks, symbol):
     
     # Complete final candle
     if current_candle:
-        # Add variation to final candle too
-        base_price = current_candle['close']
-        variation = base_price * 0.002
-        
-        if current_candle['close'] > current_candle['open']:
-            high = current_candle['close'] + variation * 0.5
-            low = current_candle['open'] - variation * 0.3
-            open_price = current_candle['open']
-            close_price = current_candle['close']
-        elif current_candle['close'] < current_candle['open']:
-            high = current_candle['open'] + variation * 0.3
-            low = current_candle['close'] - variation * 0.5
-            open_price = current_candle['open']
-            close_price = current_candle['close']
-        else:
-            open_price = base_price - variation * 0.1
-            close_price = base_price + variation * 0.1
-            high = base_price + variation * 0.3
-            low = base_price - variation * 0.2
-        
         candles.append(CandlestickTick(
             symbol=symbol,
             timestamp=current_candle['timestamp'],
-            open=round(open_price, 2),
-            high=round(high, 2),
-            low=round(low, 2),
-            close=round(close_price, 2),
+            open=current_candle['open'],
+            high=current_candle['high'],
+            low=current_candle['low'],
+            close=current_candle['close'],
             volume=current_candle['volume']
         ))
     

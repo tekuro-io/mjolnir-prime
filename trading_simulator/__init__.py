@@ -20,7 +20,7 @@ from .trading.engine import TradeEngine
 from .patterns.detector import PatternDetector
 from .patterns.strategies import PatternStrategies, StrategyFactory
 from .algorithms.base import TradingAlgorithm, AlgorithmManager, BacktestRunner
-from .data.loaders import JsonTickLoader, MockDataGenerator
+# from .data.loaders import JsonTickLoader, MockDataGenerator  # Module not found
 # from .data.websocket_client import WebSocketClient, WebSocketConfig, TickData  # Module not found
 # from .data.candle_aggregator import CandleAggregator, RealTimeDataManager  # Module not found
 # from .config.websocket_config import TradingWebSocketConfig  # Module has missing dependencies
@@ -77,7 +77,7 @@ __all__ = [
     'PatternStrategies', 'StrategyFactory', 'TradingAlgorithm', 
     'AlgorithmManager', 'BacktestRunner',
     # Data handling
-    'JsonTickLoader', 'MockDataGenerator',
+    # 'JsonTickLoader', 'MockDataGenerator',  # Module not found
     # WebSocket and real-time
     # 'WebSocketClient', 'WebSocketConfig', 'TickData',  # Module not found
     # 'CandleAggregator', 'RealTimeDataManager',  # Module not found
