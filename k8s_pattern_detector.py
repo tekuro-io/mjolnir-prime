@@ -338,23 +338,52 @@ class K8sPatternDetector:
             self.stats['errors'] += 1
     
     async def _initialize_connection(self):
-        """Initialize WebSocket connection - no explicit subscription needed"""
+        """Initialize WebSocket connection and subscribe to all monitored stocks"""
         self.logger.info(f"WebSocket connected to {self.config.websocket_url}")
         self.logger.info(f"Monitoring {len(self.monitored_stocks)} stocks: {sorted(self.monitored_stocks)}")
-        self.logger.info("Waiting for automatic data feed from WebSocket server...")
         
-        # No explicit subscription needed - just start listening for messages
-        # The WebSocket server automatically sends data for all stocks
+        # Subscribe to all monitored stocks
+        await self._subscribe_to_stocks()
+        
+        self.logger.info("Stock subscriptions completed - waiting for tick data...")
+    
+    async def _subscribe_to_stocks(self):
+        """Subscribe to all monitored stocks"""
+        try:
+            subscription_count = 0
+            for stock in sorted(self.monitored_stocks):
+                subscribe_msg = {
+                    "type": "subscribe",
+                    "topic": f"stock:{stock}"
+                }
+                await self.websocket.send(json.dumps(subscribe_msg))
+                subscription_count += 1
+                
+                # Log progress every 50 subscriptions
+                if subscription_count % 50 == 0:
+                    self.logger.info(f"Subscribed to {subscription_count}/{len(self.monitored_stocks)} stocks...")
+            
+            self.logger.info(f"Successfully subscribed to {subscription_count} stocks")
+            
+        except Exception as e:
+            self.logger.error(f"Error subscribing to stocks: {e}")
+            raise
     
     async def _process_tick_message(self, message: str):
         """Process incoming tick data message and aggregate into 1-minute candles"""
         try:
             data = json.loads(message)
+            
+            # Handle info/status messages from server
+            if data.get('type') == 'info':
+                self.logger.debug(f"Server info: {data.get('message', '')}")
+                return
+            
             self.stats['messages_processed'] += 1
             
-            # Log first few messages for debugging
+            # Log first few tick messages for debugging
             if self.stats['messages_processed'] <= 5:
-                self.logger.info(f"Received message #{self.stats['messages_processed']}: {message[:200]}...")
+                self.logger.info(f"Received tick message #{self.stats['messages_processed']}: {message[:200]}...")
             
             # Extract tick information
             topic = data.get('topic', '')
