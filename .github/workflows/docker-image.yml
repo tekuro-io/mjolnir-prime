@@ -10,7 +10,7 @@ env:
   DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
   ARGOCD_USERNAME: ${{ secrets.ARGOCD_USERNAME }}
   ARGOCD_PASSWORD: ${{ secrets.ARGOCD_PASSWORD }}
-  IMAGE_NAME: artifacts.tekuro.io/alert:latest
+  IMAGE_NAME: artifacts.tekuro.io/mjolnir:latest
 
 jobs:
 
@@ -72,5 +72,5 @@ jobs:
         NEW_TAG: ${{ steps.tag.outputs.new_tag }}
       run: |
         argocd login argo.tekuro.io --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
-        argocd app set alert --revision $NEW_TAG
-        argocd app sync alert
+        argocd app set mjolnir-pattern-detector --revision $NEW_TAG
+        argocd app sync mjolnir-pattern-detector
