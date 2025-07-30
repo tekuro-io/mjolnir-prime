@@ -474,7 +474,7 @@ class K8sPatternDetector:
                 self.candle_history[ticker] = self.candle_history[ticker][-PATTERN_LOOKBACK_WINDOW:]
             
             # Log completed candle
-            self.logger.debug(
+            self.logger.info(
                 f"Completed 1min candle for {ticker}: "
                 f"O:{candle.open:.2f} H:{candle.high:.2f} L:{candle.low:.2f} C:{candle.close:.2f} V:{candle.volume}"
             )
