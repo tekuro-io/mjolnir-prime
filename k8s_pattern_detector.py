@@ -396,6 +396,13 @@ class K8sPatternDetector:
                     self.logger.info(f"Subscription confirmed #{self._subscription_count}: {topic}")
                 return
             
+            # Initialize variables
+            ticker = None
+            timestamp = 0
+            price = 0.0
+            prev_price = 0.0
+            volume = 100
+            
             # Handle tick data - check if this is actual tick data
             if 'ticker' in data and 'timestamp' in data and 'price' in data:
                 # This is tick data in the format: {"ticker": "SYMBOL", "timestamp": 123, "price": 1.23}
@@ -444,7 +451,8 @@ class K8sPatternDetector:
                 # Skip logging non-tick messages to reduce spam
                 return
             
-            if price <= 0:
+            # Validate tick data
+            if not ticker or price <= 0 or timestamp <= 0:
                 return
             
             # Convert to datetime
