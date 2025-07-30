@@ -125,7 +125,7 @@ class K8sPatternDetector:
         )
         
         logger = logging.getLogger(self.config.app_name)
-        logger.info(f"Logging configured at {self.config.log_level} level")
+        logger.info(f"Logging configured at {LOG_LEVEL} level")
         return logger
     
     async def initialize(self):
