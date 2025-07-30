@@ -246,6 +246,8 @@ class K8sPatternDetector:
             )
             
             self.logger.info("WebSocket connection established")
+            self.logger.info(f"WebSocket state: {self.websocket.state.name}")
+            self.logger.info("No explicit subscription required - expecting automatic data feed")
             
         except Exception as e:
             self.logger.error(f"WebSocket connection failed: {e}")
@@ -339,6 +341,7 @@ class K8sPatternDetector:
         """Initialize WebSocket connection - no explicit subscription needed"""
         self.logger.info(f"WebSocket connected to {self.config.websocket_url}")
         self.logger.info(f"Monitoring {len(self.monitored_stocks)} stocks: {sorted(self.monitored_stocks)}")
+        self.logger.info("Waiting for automatic data feed from WebSocket server...")
         
         # No explicit subscription needed - just start listening for messages
         # The WebSocket server automatically sends data for all stocks
@@ -348,6 +351,10 @@ class K8sPatternDetector:
         try:
             data = json.loads(message)
             self.stats['messages_processed'] += 1
+            
+            # Log first few messages for debugging
+            if self.stats['messages_processed'] <= 5:
+                self.logger.info(f"Received message #{self.stats['messages_processed']}: {message[:200]}...")
             
             # Extract tick information
             topic = data.get('topic', '')
