@@ -305,14 +305,14 @@ class PatternDetector:
                 flagpole_gain = (flagpole_end - flagpole_start) / flagpole_start
                 
                 # Must have significant gain (scale requirement with flagpole length)
-                min_gain = max(0.06, 0.08 - (flagpole_len - 5) * 0.005)  # 6-8% depending on length
+                min_gain = max(0.03, 0.05 - (flagpole_len - 5) * 0.003)  # 3-5% depending on length
                 if flagpole_gain < min_gain:
                     continue
                     
                 # Check that flagpole shows general upward progression
                 flagpole_start_price = flagpole_candles[0].open
                 flagpole_end_price = flagpole_candles[-1].close
-                if flagpole_end_price <= flagpole_start_price * 1.02:  # At least 2% net gain
+                if flagpole_end_price <= flagpole_start_price * 1.01:  # At least 1% net gain
                     continue
                 
                 # Phase 2: Validate flag (consolidation after flagpole)

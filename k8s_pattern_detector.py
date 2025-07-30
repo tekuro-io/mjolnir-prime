@@ -290,6 +290,7 @@ class K8sPatternDetector:
             notification = self.pattern_notifier.create_notification(pattern)
             
             # Send pattern message to WebSocket (async)
+            self.logger.info(f"🚀 Sending pattern notification for {pattern.symbol} {pattern.pattern_type.value}")
             asyncio.create_task(self._send_pattern_message(pattern))
             
         except Exception as e:
@@ -299,6 +300,7 @@ class K8sPatternDetector:
     async def _send_pattern_message(self, pattern: PatternMatch):
         """Send pattern detection message to WebSocket in live_pattern_detector format"""
         try:
+            self.logger.info(f"📤 _send_pattern_message called for {pattern.symbol} {pattern.pattern_type.value}")
             if not self.websocket or self.websocket.state.name == 'CLOSED':
                 self.logger.warning("WebSocket not connected, cannot send pattern message")
                 return
@@ -310,28 +312,36 @@ class K8sPatternDetector:
             elif pattern.symbol in self.candle_history and self.candle_history[pattern.symbol]:
                 trigger_candle = self.candle_history[pattern.symbol][-1]  # Use most recent candle
             
-            # Create message in live_pattern_detector format
+            # Create message in working notification format
+            is_bullish = pattern.pattern_type.value in ['bull_flag', 'bullish_reversal', 'flat_top_breakout']
+            
             pattern_msg = {
-                "type": "pattern_detected",
+                "topic": "pattern_detection",
                 "data": {
-                    "symbol": pattern.symbol,
-                    "pattern_type": pattern.pattern_type.value,
-                    "confidence": round(pattern.confidence, 4),
-                    "trigger_price": round(pattern.trigger_price, 2),
+                    "ticker": pattern.symbol,
+                    "pattern": pattern.pattern_type.value,
+                    "pattern_display_name": pattern.pattern_type.value.replace('_', ' ').title(),
+                    "price": round(pattern.trigger_price, 2),
                     "timestamp": pattern.timestamp.isoformat(),
-                    "candle_data": {
-                        "open": round(trigger_candle.open if trigger_candle else pattern.trigger_price, 2),
-                        "high": round(trigger_candle.high if trigger_candle else pattern.trigger_price, 2),
-                        "low": round(trigger_candle.low if trigger_candle else pattern.trigger_price, 2),
-                        "close": round(trigger_candle.close if trigger_candle else pattern.trigger_price, 2),
-                        "volume": trigger_candle.volume if trigger_candle else 0
-                    },
-                    "source": "k8s_pattern_detector"
+                    "confidence": round(pattern.confidence, 2),
+                    "alert_level": "high" if pattern.confidence > 0.8 else "medium" if pattern.confidence > 0.6 else "low",
+                    "message": f"{pattern.pattern_type.value.replace('_', ' ').title()} detected for {pattern.symbol} at ${pattern.trigger_price:.2f} ({pattern.confidence:.0%} confidence)",
+                    "is_bullish": is_bullish,
+                    "is_bearish": not is_bullish,
+                    "direction": "bullish" if is_bullish else "bearish",
+                    "metadata": {
+                        "detection_type": "natural",
+                        "duration_minutes": 1.0,
+                        "stage": 1,
+                        "source": "k8s_pattern_detector",
+                        "candles_involved": len(pattern.candles_involved) if pattern.candles_involved else 0,
+                        **pattern.metadata
+                    }
                 }
             }
             
             await self.websocket.send(json.dumps(pattern_msg))
-            self.logger.debug(f"Pattern message sent: {pattern.symbol} - {pattern.pattern_type.value}")
+            self.logger.info(f"✅ Pattern notification sent successfully: {pattern.symbol} {pattern.pattern_type.value}")
             
         except Exception as e:
             self.logger.error(f"Failed to send pattern message: {e}")
