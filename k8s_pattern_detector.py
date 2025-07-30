@@ -297,7 +297,7 @@ class K8sPatternDetector:
     async def _send_pattern_message(self, pattern: PatternMatch):
         """Send pattern detection message to WebSocket in live_pattern_detector format"""
         try:
-            if not self.websocket or self.websocket.closed:
+            if not self.websocket or self.websocket.state.name == 'CLOSED':
                 self.logger.warning("WebSocket not connected, cannot send pattern message")
                 return
             
@@ -553,7 +553,7 @@ class K8sPatternDetector:
         """Cleanup resources"""
         self.logger.info("Cleaning up resources...")
         
-        if self.websocket and not self.websocket.closed:
+        if self.websocket and self.websocket.state.name != 'CLOSED':
             await self.websocket.close()
         
         if self.redis_client:
