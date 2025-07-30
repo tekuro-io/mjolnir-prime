@@ -386,39 +386,55 @@ class K8sPatternDetector:
                 return
             
             # Handle subscription confirmation messages
-            if data.get('type') == 'subscribed':
+            if data.get('type') == 'ack_subscribe':
                 topic = data.get('topic', '')
-                self.logger.info(f"Subscription confirmed: {topic}")
+                self.logger.debug(f"Subscription confirmed: {topic}")
                 return
             
-            # Handle any other non-tick messages
-            if data.get('type') not in ['tick', 'data'] and 'topic' not in data:
-                self.logger.info(f"Unknown message type: {message[:200]}...")
+            # Handle tick data - check if this is actual tick data
+            if 'ticker' in data and 'timestamp' in data and 'price' in data:
+                # This is tick data in the format: {"ticker": "SYMBOL", "timestamp": 123, "price": 1.23}
+                ticker = data.get('ticker', '')
+                if ticker not in self.monitored_stocks:
+                    return
+                
+                self.stats['messages_processed'] += 1
+                
+                # Log first few tick messages for debugging
+                if self.stats['messages_processed'] <= 5:
+                    self.logger.info(f"Received tick message #{self.stats['messages_processed']}: {message[:200]}...")
+                
+                # Extract tick data from the actual format
+                timestamp = data.get('timestamp', 0)
+                price = float(data.get('price', 0))
+                prev_price = float(data.get('prev_price', price))  # Use price if prev_price not available
+                volume = int(data.get('volume', 100))  # Default volume if not provided
+                
+            elif 'topic' in data and data.get('topic', '').startswith('stock:'):
+                # Handle the expected format: {"topic": "stock:TICKER", "data": {...}}
+                topic = data.get('topic', '')
+                tick_data = data.get('data', {})
+                
+                ticker = topic.split(':', 1)[1]
+                if ticker not in self.monitored_stocks:
+                    return
+                
+                self.stats['messages_processed'] += 1
+                
+                # Log first few tick messages for debugging
+                if self.stats['messages_processed'] <= 5:
+                    self.logger.info(f"Received tick message #{self.stats['messages_processed']}: {message[:200]}...")
+                
+                # Extract tick data from the payload format
+                timestamp = tick_data.get('timestamp', 0)
+                price = float(tick_data.get('price', 0))
+                prev_price = float(tick_data.get('prev_price', price))
+                volume = int(tick_data.get('volume', 100))
+                
+            else:
+                # Handle any other non-tick messages
+                self.logger.debug(f"Non-tick message: {message[:200]}...")
                 return
-            
-            self.stats['messages_processed'] += 1
-            
-            # Log first few tick messages for debugging
-            if self.stats['messages_processed'] <= 5:
-                self.logger.info(f"Received tick message #{self.stats['messages_processed']}: {message[:200]}...")
-            
-            # Extract tick information
-            topic = data.get('topic', '')
-            tick_data = data.get('data', {})
-            
-            # Parse topic to get ticker (format: "stock:TICKER")
-            if not topic.startswith('stock:'):
-                return
-            
-            ticker = topic.split(':', 1)[1]
-            if ticker not in self.monitored_stocks:
-                return
-            
-            # Extract tick data from the payload format
-            timestamp = tick_data.get('timestamp', 0)
-            price = float(tick_data.get('price', 0))
-            prev_price = float(tick_data.get('prev_price', price))
-            volume = int(tick_data.get('volume', 0))
             
             if price <= 0:
                 return
