@@ -387,8 +387,13 @@ class K8sPatternDetector:
             
             # Handle subscription confirmation messages
             if data.get('type') == 'ack_subscribe':
-                topic = data.get('topic', '')
-                self.logger.debug(f"Subscription confirmed: {topic}")
+                # Only log the first few confirmations to avoid spam
+                if not hasattr(self, '_subscription_count'):
+                    self._subscription_count = 0
+                self._subscription_count += 1
+                if self._subscription_count <= 3 or self._subscription_count % 100 == 0:
+                    topic = data.get('topic', '')
+                    self.logger.info(f"Subscription confirmed #{self._subscription_count}: {topic}")
                 return
             
             # Handle tick data - check if this is actual tick data
@@ -400,9 +405,11 @@ class K8sPatternDetector:
                 
                 self.stats['messages_processed'] += 1
                 
-                # Log first few tick messages for debugging
-                if self.stats['messages_processed'] <= 5:
-                    self.logger.info(f"Received tick message #{self.stats['messages_processed']}: {message[:200]}...")
+                # Log first tick message and then periodically
+                if self.stats['messages_processed'] == 1:
+                    self.logger.info(f"First tick received: {ticker} @ ${price}")
+                elif self.stats['messages_processed'] % 1000 == 0:
+                    self.logger.info(f"Processed {self.stats['messages_processed']} tick messages")
                 
                 # Extract tick data from the actual format
                 timestamp = data.get('timestamp', 0)
@@ -421,9 +428,11 @@ class K8sPatternDetector:
                 
                 self.stats['messages_processed'] += 1
                 
-                # Log first few tick messages for debugging
-                if self.stats['messages_processed'] <= 5:
-                    self.logger.info(f"Received tick message #{self.stats['messages_processed']}: {message[:200]}...")
+                # Log first tick message and then periodically
+                if self.stats['messages_processed'] == 1:
+                    self.logger.info(f"First tick received: {ticker} @ ${price}")
+                elif self.stats['messages_processed'] % 1000 == 0:
+                    self.logger.info(f"Processed {self.stats['messages_processed']} tick messages")
                 
                 # Extract tick data from the payload format
                 timestamp = tick_data.get('timestamp', 0)
@@ -432,8 +441,7 @@ class K8sPatternDetector:
                 volume = int(tick_data.get('volume', 100))
                 
             else:
-                # Handle any other non-tick messages
-                self.logger.debug(f"Non-tick message: {message[:200]}...")
+                # Skip logging non-tick messages to reduce spam
                 return
             
             if price <= 0:
