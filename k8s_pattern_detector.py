@@ -36,7 +36,7 @@ from trading_simulator.realtime.pattern_notifier import PatternNotifier
 # Pattern Detection Constants
 PATTERN_MIN_CONFIDENCE = 0.65
 PATTERN_TOLERANCE = 0.01
-PATTERN_LOOKBACK_WINDOW = 50
+PATTERN_LOOKBACK_WINDOW = 20  # Reduced from 50 to 20 minutes
 LOG_LEVEL = 'INFO'
 
 @dataclass
@@ -94,6 +94,10 @@ class K8sPatternDetector:
         self.is_ready = False
         self.startup_complete = False
         self.last_heartbeat = time.time()
+        
+        # Memory management
+        self.last_cleanup = time.time()
+        self.cleanup_interval = 300  # Cleanup every 5 minutes
         
         # Statistics
         self.stats = {
@@ -577,6 +581,9 @@ class K8sPatternDetector:
             # Run pattern detection if we have enough history
             if len(self.candle_history[ticker]) >= 10:
                 patterns = self.pattern_detector.add_candle(candle)
+                
+            # Periodic memory cleanup
+            self._cleanup_memory()
                 # Patterns are automatically processed via callbacks
             
         except Exception as e:
@@ -657,6 +664,63 @@ class K8sPatternDetector:
         await self.pattern_notifier.close_websocket_connection()
         
         self.logger.info("Cleanup completed")
+    
+    def _cleanup_memory(self):
+        """Periodic memory cleanup to prevent memory leaks"""
+        try:
+            current_time = time.time()
+            
+            # Only cleanup every 5 minutes
+            if current_time - self.last_cleanup < self.cleanup_interval:
+                return
+                
+            self.logger.info("🧹 Starting memory cleanup...")
+            
+            # Cleanup old current_candles (older than 5 minutes)
+            cutoff_time = datetime.now() - timedelta(minutes=5)
+            cleaned_candles = 0
+            
+            for ticker in list(self.current_candles.keys()):
+                for candle_key in list(self.current_candles[ticker].keys()):
+                    candle_data = self.current_candles[ticker][candle_key]
+                    if candle_data['timestamp'] < cutoff_time:
+                        del self.current_candles[ticker][candle_key]
+                        cleaned_candles += 1
+                
+                # Remove empty ticker entries
+                if not self.current_candles[ticker]:
+                    del self.current_candles[ticker]
+            
+            # Trim candle history to exactly the lookback window
+            trimmed_candles = 0
+            for ticker in self.candle_history:
+                if len(self.candle_history[ticker]) > PATTERN_LOOKBACK_WINDOW:
+                    excess = len(self.candle_history[ticker]) - PATTERN_LOOKBACK_WINDOW
+                    self.candle_history[ticker] = self.candle_history[ticker][-PATTERN_LOOKBACK_WINDOW:]
+                    trimmed_candles += excess
+            
+            # Clear old alerted patterns (older than 2 hours)
+            old_alerts_cutoff = datetime.now() - timedelta(hours=2)
+            cleaned_alerts = 0
+            
+            for symbol in list(self.pattern_detector.alerted_patterns.keys()):
+                for pattern_type in list(self.pattern_detector.alerted_patterns[symbol].keys()):
+                    alert_time = self.pattern_detector.alerted_patterns[symbol][pattern_type]
+                    if alert_time < old_alerts_cutoff:
+                        del self.pattern_detector.alerted_patterns[symbol][pattern_type]
+                        cleaned_alerts += 1
+                
+                # Remove empty symbol entries
+                if not self.pattern_detector.alerted_patterns[symbol]:
+                    del self.pattern_detector.alerted_patterns[symbol]
+            
+            self.last_cleanup = current_time
+            
+            if cleaned_candles > 0 or trimmed_candles > 0 or cleaned_alerts > 0:
+                self.logger.info(f"✅ Memory cleanup completed: {cleaned_candles} old candles, {trimmed_candles} excess history, {cleaned_alerts} old alerts")
+            
+        except Exception as e:
+            self.logger.error(f"Error during memory cleanup: {e}")
 
 
 async def main():
