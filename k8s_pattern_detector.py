@@ -350,12 +350,18 @@ class K8sPatternDetector:
     async def _subscribe_to_stocks(self):
         """Subscribe to all monitored stocks"""
         try:
+            self.logger.info(f"Starting subscription to {len(self.monitored_stocks)} stocks...")
             subscription_count = 0
             for stock in sorted(self.monitored_stocks):
                 subscribe_msg = {
                     "type": "subscribe",
                     "topic": f"stock:{stock}"
                 }
+                
+                # Log first few subscriptions for debugging
+                if subscription_count < 3:
+                    self.logger.info(f"Subscribing to {stock}: {json.dumps(subscribe_msg)}")
+                
                 await self.websocket.send(json.dumps(subscribe_msg))
                 subscription_count += 1
                 
@@ -363,7 +369,7 @@ class K8sPatternDetector:
                 if subscription_count % 50 == 0:
                     self.logger.info(f"Subscribed to {subscription_count}/{len(self.monitored_stocks)} stocks...")
             
-            self.logger.info(f"Successfully subscribed to {subscription_count} stocks")
+            self.logger.info(f"Successfully sent {subscription_count} subscription requests")
             
         except Exception as e:
             self.logger.error(f"Error subscribing to stocks: {e}")
@@ -376,7 +382,18 @@ class K8sPatternDetector:
             
             # Handle info/status messages from server
             if data.get('type') == 'info':
-                self.logger.debug(f"Server info: {data.get('message', '')}")
+                self.logger.info(f"Server info: {data.get('message', '')}")
+                return
+            
+            # Handle subscription confirmation messages
+            if data.get('type') == 'subscribed':
+                topic = data.get('topic', '')
+                self.logger.info(f"Subscription confirmed: {topic}")
+                return
+            
+            # Handle any other non-tick messages
+            if data.get('type') not in ['tick', 'data'] and 'topic' not in data:
+                self.logger.info(f"Unknown message type: {message[:200]}...")
                 return
             
             self.stats['messages_processed'] += 1
