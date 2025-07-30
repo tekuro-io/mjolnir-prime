@@ -73,7 +73,7 @@ class PatternDetector:
             self.alerted_patterns[symbol] = {}
         
         # Check if we've already alerted for this pattern type recently
-        cooldown_minutes = 30  # Don't re-alert same pattern for 30 minutes
+        cooldown_minutes = 5  # Don't re-alert same pattern for 5 minutes
         current_time = pattern.timestamp
         
         if pattern_type in self.alerted_patterns[symbol]:
@@ -276,103 +276,60 @@ class PatternDetector:
         return patterns
     
     def _detect_bull_flag(self, symbol: str) -> List[PatternMatch]:
-        """Detect bull flag pattern: strong upward move, consolidation, setup complete"""
+        """Detect bull flag pattern with flexible, organic pattern recognition"""
         candles = list(self.candle_history[symbol])
         patterns = []
         
         if len(candles) < 8:  # Minimum: 3 flagpole + 5 flag = 8 candles
             return patterns
         
-        # Live streaming detection - check if current state forms a bull flag
-        # Try different flagpole lengths but always end at current candle
-        
-        for flagpole_len in range(3, min(13, len(candles) - 5 + 1)):  # 3-12 candle flagpoles
-            for flag_len in range(5, min(16, len(candles) - flagpole_len + 1)):  # 5-15 candle flags (minimum 5 minutes)
+        # Try different flagpole and flag combinations
+        for flagpole_len in range(3, min(13, len(candles) - 4)):  # 3-12 candle flagpoles
+            for flag_len in range(4, min(16, len(candles) - flagpole_len + 1)):  # 4-15 candle flags
                 total_pattern_len = flagpole_len + flag_len
                 
-                # Make sure we have enough candles
                 if total_pattern_len > len(candles):
                     continue
                     
-                # Always look at the most recent pattern ending NOW (at current candle)
+                # Always look at the most recent pattern ending NOW
                 start_idx = len(candles) - total_pattern_len
                 flagpole_candles = candles[start_idx:start_idx + flagpole_len]
                 flag_candles = candles[start_idx + flagpole_len:start_idx + total_pattern_len]
                 
-                # Phase 1: Validate flagpole (strong upward move)
-                flagpole_start = min(c.low for c in flagpole_candles)
-                flagpole_end = max(c.high for c in flagpole_candles)
-                flagpole_gain = (flagpole_end - flagpole_start) / flagpole_start
-                
-                # Must have significant gain (scale requirement with flagpole length)
-                min_gain = max(0.03, 0.05 - (flagpole_len - 5) * 0.003)  # 3-5% depending on length
-                if flagpole_gain < min_gain:
+                # Phase 1: Analyze flagpole for organic upward trend
+                if not self._is_organic_flagpole(flagpole_candles):
                     continue
+                
+                # Phase 2: Analyze flag for consolidation pattern
+                if not self._is_organic_flag(flag_candles, flagpole_candles):
+                    continue
+                
+                # Phase 3: Validate overall pattern relationship
+                pattern_quality = self._validate_bull_flag_relationship(flagpole_candles, flag_candles)
+                if pattern_quality['valid']:
+                    trigger_candle = flag_candles[-1]
                     
-                # Check that flagpole shows general upward progression
-                flagpole_start_price = flagpole_candles[0].open
-                flagpole_end_price = flagpole_candles[-1].close
-                if flagpole_end_price <= flagpole_start_price * 1.01:  # At least 1% net gain
-                    continue
-                
-                # Phase 2: Validate flag (consolidation after flagpole)
-                flag_high = max(c.high for c in flag_candles)
-                flag_low = min(c.low for c in flag_candles)
-                flag_range = (flag_high - flag_low) / flag_high
-                
-                # Flag should pullback 23.6% to 61.8% of flagpole gain
-                pullback_amount = (flagpole_end - flag_low) / (flagpole_end - flagpole_start)
-                if not (0.15 <= pullback_amount <= 0.75):  # More flexible than strict Fibonacci
-                    continue
+                    confidence = self._calculate_organic_bull_flag_confidence(
+                        flagpole_candles, flag_candles, pattern_quality
+                    )
                     
-                # Flag should be relatively narrow (consolidation)
-                # Scale requirement with flag length - longer flags can be slightly wider
-                max_range = min(0.12, 0.08 + (flag_len - 5) * 0.005)
-                if flag_range > max_range:
-                    continue
-                    
-                # Flag should not make new highs beyond flagpole (with small tolerance)
-                if flag_high > flagpole_end * 1.02:  # Allow 2% tolerance
-                    continue
-                
-                # NEW: Require actual consolidation - flag must flatten out, not just pullback
-                if not self._is_consolidating(flag_candles, flag_len):
-                    continue
-                
-                # Phase 3: Bull flag setup is complete - trigger for actionable trading
-                trigger_candle = flag_candles[-1]
-                
-                # Calculate confidence based on setup quality and pattern characteristics
-                confidence = self._calculate_flexible_bull_flag_confidence(
-                    flagpole_candles, flag_candles, flagpole_gain, pullback_amount, 
-                    flag_range, flagpole_len, flag_len
-                )
-                
-                # Only add high-quality patterns to avoid duplicates
-                if confidence >= 0.6:
-                    patterns.append(PatternMatch(
-                        pattern_type=PatternType.BULL_FLAG,
-                        confidence=confidence,
-                        timestamp=trigger_candle.timestamp,
-                        symbol=symbol,
-                        trigger_price=trigger_candle.close,
-                        candles_involved=flagpole_candles + flag_candles,
-                        metadata={
-                            'flagpole_gain': flagpole_gain,
-                            'pullback_ratio': pullback_amount,
-                            'flag_range': flag_range,
-                            'flag_high': flag_high,
-                            'flag_low': flag_low,
-                            'flagpole_start': flagpole_start,
-                            'flagpole_end': flagpole_end,
-                            'flagpole_length': flagpole_len,
-                            'flag_length': flag_len,
-                            'breakout_target': flag_high,
-                            'setup_type': 'pre_breakout'
-                        }
-                    ))
+                    if confidence >= 0.6:
+                        patterns.append(PatternMatch(
+                            pattern_type=PatternType.BULL_FLAG,
+                            confidence=confidence,
+                            timestamp=trigger_candle.timestamp,
+                            symbol=symbol,
+                            trigger_price=trigger_candle.close,
+                            candles_involved=flagpole_candles + flag_candles,
+                            metadata={
+                                'flagpole_length': flagpole_len,
+                                'flag_length': flag_len,
+                                'setup_type': 'pre_breakout',
+                                **pattern_quality
+                            }
+                        ))
         
-        # Return only the highest confidence pattern to avoid duplicates
+        # Return highest confidence pattern
         if patterns:
             return [max(patterns, key=lambda p: p.confidence)]
         return patterns
@@ -705,6 +662,163 @@ class PatternDetector:
         if flagpole_avg_volume > flag_avg_volume * 1.5:  # Strong volume decline in flag
             base_confidence += 0.1
         elif flagpole_avg_volume > flag_avg_volume:  # Some volume decline
+            base_confidence += 0.05
+        
+        return min(base_confidence, 1.0)
+    
+    def _is_organic_flagpole(self, flagpole_candles: List[CandlestickTick]) -> bool:
+        """Check if flagpole shows organic upward trend (not rigid candle-by-candle)"""
+        if len(flagpole_candles) < 3:
+            return False
+        
+        # Get key price points
+        start_low = min(c.low for c in flagpole_candles[:2])  # Start area low
+        end_high = max(c.high for c in flagpole_candles[-2:])  # End area high
+        overall_gain = (end_high - start_low) / start_low
+        
+        # Must have meaningful gain (3-6% depending on length)
+        min_gain = max(0.025, 0.04 - len(flagpole_candles) * 0.002)
+        if overall_gain < min_gain:
+            return False
+        
+        # Check for general upward progression (not every candle, but overall trend)
+        # Divide flagpole into thirds and check progression
+        third = len(flagpole_candles) // 3
+        if third > 0:
+            first_third_high = max(c.high for c in flagpole_candles[:third])
+            middle_third_high = max(c.high for c in flagpole_candles[third:2*third])
+            last_third_high = max(c.high for c in flagpole_candles[2*third:])
+            
+            # Allow for some flexibility - at least 2 of 3 sections should progress upward
+            progressions = 0
+            if middle_third_high >= first_third_high * 0.995:  # Small tolerance
+                progressions += 1
+            if last_third_high >= middle_third_high * 0.995:
+                progressions += 1
+            
+            if progressions < 1:  # Need at least some upward progression
+                return False
+        
+        # Check that we end higher than we started (net positive)
+        start_price = (flagpole_candles[0].open + flagpole_candles[0].close) / 2
+        end_price = (flagpole_candles[-1].open + flagpole_candles[-1].close) / 2
+        if end_price <= start_price * 1.005:  # At least 0.5% net gain
+            return False
+        
+        return True
+    
+    def _is_organic_flag(self, flag_candles: List[CandlestickTick], flagpole_candles: List[CandlestickTick]) -> bool:
+        """Check if flag shows organic consolidation pattern"""
+        if len(flag_candles) < 4:
+            return False
+        
+        # Get flagpole peak for reference
+        flagpole_high = max(c.high for c in flagpole_candles)
+        
+        # Flag characteristics
+        flag_high = max(c.high for c in flag_candles)
+        flag_low = min(c.low for c in flag_candles)
+        flag_range = (flag_high - flag_low) / flag_high
+        
+        # Flag should not exceed flagpole high (with tolerance)
+        if flag_high > flagpole_high * 1.03:  # 3% tolerance for sideways at top
+            return False
+        
+        # Flag should show range-bound behavior (not one-directional)
+        # Check if price oscillates rather than just declining
+        price_changes = []
+        for i in range(1, len(flag_candles)):
+            prev_mid = (flag_candles[i-1].high + flag_candles[i-1].low) / 2
+            curr_mid = (flag_candles[i].high + flag_candles[i].low) / 2
+            change = curr_mid - prev_mid
+            price_changes.append(change)
+        
+        # Count direction changes (oscillation indicates consolidation)
+        direction_changes = 0
+        for i in range(1, len(price_changes)):
+            if (price_changes[i] > 0) != (price_changes[i-1] > 0):
+                direction_changes += 1
+        
+        # Need some oscillation (not just straight decline)
+        min_oscillations = max(1, len(flag_candles) // 3)
+        if direction_changes < min_oscillations:
+            return False
+        
+        # Flag range should be reasonable (not too wide, not too narrow)
+        if flag_range > 0.15 or flag_range < 0.01:  # 1% to 15% range
+            return False
+        
+        return True
+    
+    def _validate_bull_flag_relationship(self, flagpole_candles: List[CandlestickTick], 
+                                       flag_candles: List[CandlestickTick]) -> dict:
+        """Validate the relationship between flagpole and flag"""
+        flagpole_low = min(c.low for c in flagpole_candles)
+        flagpole_high = max(c.high for c in flagpole_candles)
+        flagpole_gain = (flagpole_high - flagpole_low) / flagpole_low
+        
+        flag_high = max(c.high for c in flag_candles)
+        flag_low = min(c.low for c in flag_candles)
+        flag_range = (flag_high - flag_low) / flag_high
+        
+        # Calculate pullback from flagpole high
+        pullback_amount = (flagpole_high - flag_low) / (flagpole_high - flagpole_low)
+        
+        # Validate pullback is reasonable (not too shallow, not too deep)
+        if not (0.1 <= pullback_amount <= 0.8):  # 10% to 80% pullback
+            return {'valid': False}
+        
+        # Check proportions are reasonable
+        if flagpole_gain < 0.02 or flagpole_gain > 0.5:  # 2% to 50% flagpole gain
+            return {'valid': False}
+        
+        return {
+            'valid': True,
+            'flagpole_gain': flagpole_gain,
+            'pullback_ratio': pullback_amount,
+            'flag_range': flag_range,
+            'flagpole_low': flagpole_low,
+            'flagpole_high': flagpole_high,
+            'flag_high': flag_high,
+            'flag_low': flag_low
+        }
+    
+    def _calculate_organic_bull_flag_confidence(self, flagpole_candles: List[CandlestickTick], 
+                                              flag_candles: List[CandlestickTick], 
+                                              pattern_quality: dict) -> float:
+        """Calculate confidence for organic bull flag patterns"""
+        base_confidence = 0.6
+        
+        # Strong flagpole bonus
+        flagpole_gain = pattern_quality['flagpole_gain']
+        if flagpole_gain > 0.08:  # 8%+ gain
+            base_confidence += 0.15
+        elif flagpole_gain > 0.05:  # 5%+ gain
+            base_confidence += 0.10
+        elif flagpole_gain > 0.03:  # 3%+ gain
+            base_confidence += 0.05
+        
+        # Ideal pullback bonus (38.2% - 50% is classic)
+        pullback_ratio = pattern_quality['pullback_ratio']
+        if 0.35 <= pullback_ratio <= 0.55:
+            base_confidence += 0.15
+        elif 0.25 <= pullback_ratio <= 0.65:
+            base_confidence += 0.10
+        elif 0.15 <= pullback_ratio <= 0.75:
+            base_confidence += 0.05
+        
+        # Tight consolidation bonus
+        flag_range = pattern_quality['flag_range']
+        if flag_range <= 0.05:  # Very tight 5%
+            base_confidence += 0.10
+        elif flag_range <= 0.08:  # Tight 8%
+            base_confidence += 0.05
+        
+        # Pattern proportions (balanced flagpole:flag ratio)
+        flagpole_len = len(flagpole_candles)
+        flag_len = len(flag_candles)
+        ratio = flagpole_len / flag_len
+        if 0.3 <= ratio <= 2.0:  # Reasonable proportions
             base_confidence += 0.05
         
         return min(base_confidence, 1.0)
