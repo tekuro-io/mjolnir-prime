@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import sys
 import time
 import redis
@@ -98,6 +99,11 @@ class K8sPatternDetector:
         # Memory management
         self.last_cleanup = time.time()
         self.cleanup_interval = 300  # Cleanup every 5 minutes
+        
+        # Reconnection management
+        self.max_reconnect_attempts = 5
+        self.reconnect_delay = 5  # Start with 5 seconds
+        self.max_reconnect_delay = 60  # Max 60 seconds between attempts
         
         # Statistics
         self.stats = {
@@ -238,24 +244,44 @@ class K8sPatternDetector:
             self.stats['errors'] += 1
     
     async def _initialize_websocket(self):
-        """Initialize WebSocket connection"""
-        try:
-            self.logger.info(f"Connecting to WebSocket: {self.config.websocket_url}")
-            
-            # Connect to WebSocket server
-            self.websocket = await websockets.connect(
-                self.config.websocket_url,
-                ping_interval=20,
-                ping_timeout=10
-            )
-            
-            self.logger.info("WebSocket connection established")
-            self.logger.info(f"WebSocket state: {self.websocket.state.name}")
-            self.logger.info("No explicit subscription required - expecting automatic data feed")
-            
-        except Exception as e:
-            self.logger.error(f"WebSocket connection failed: {e}")
-            raise
+        """Initialize WebSocket connection with reconnection logic"""
+        attempt = 0
+        delay = self.reconnect_delay
+        
+        while attempt < self.max_reconnect_attempts:
+            try:
+                if attempt > 0:
+                    self.logger.info(f"Reconnection attempt {attempt}/{self.max_reconnect_attempts} after {delay}s delay...")
+                    await asyncio.sleep(delay)
+                
+                self.logger.info(f"Connecting to WebSocket: {self.config.websocket_url}")
+                
+                # Connect to WebSocket server
+                self.websocket = await websockets.connect(
+                    self.config.websocket_url,
+                    ping_interval=20,
+                    ping_timeout=10
+                )
+                
+                self.logger.info("WebSocket connection established")
+                self.logger.info(f"WebSocket state: {self.websocket.state.name}")
+                self.logger.info("No explicit subscription required - expecting automatic data feed")
+                
+                # Reset reconnection delay on successful connection
+                self.reconnect_delay = 5
+                return
+                
+            except Exception as e:
+                attempt += 1
+                self.logger.error(f"WebSocket connection failed (attempt {attempt}): {e}")
+                
+                if attempt >= self.max_reconnect_attempts:
+                    self.logger.error("Max reconnection attempts reached, giving up")
+                    raise
+                
+                # Exponential backoff with jitter
+                delay = min(delay * 2, self.max_reconnect_delay)
+                delay += random.uniform(0, 1)  # Add jitter
     
     
     def _on_pattern_detected(self, pattern: PatternMatch):
@@ -591,32 +617,60 @@ class K8sPatternDetector:
             self.stats['errors'] += 1
     
     async def run(self):
-        """Main service loop"""
+        """Main service loop with reconnection logic"""
         self.is_running = True
         self.logger.info("Pattern detection service started")
         
-        try:
-            # Initialize connection (no subscription needed)
-            await self._initialize_connection()
-            
-            # Periodic tasks
-            stock_refresh_task = asyncio.create_task(self._periodic_stock_refresh())
-            heartbeat_task = asyncio.create_task(self._heartbeat_monitor())
-            
-            # Main message processing loop
-            async for message in self.websocket:
-                await self._process_tick_message(message)
+        # Periodic tasks
+        stock_refresh_task = asyncio.create_task(self._periodic_stock_refresh())
+        heartbeat_task = asyncio.create_task(self._heartbeat_monitor())
+        
+        while self.is_running:
+            try:
+                # Initialize connection and subscribe
+                await self._initialize_connection()
                 
-        except websockets.exceptions.ConnectionClosed:
-            self.logger.warning("WebSocket connection closed")
-        except KeyboardInterrupt:
-            self.logger.info("Service stopped by user")
-        except Exception as e:
-            self.logger.error(f"Service error: {e}")
-            self.is_healthy = False
-        finally:
-            self.is_running = False
-            await self._cleanup()
+                # Main message processing loop
+                async for message in self.websocket:
+                    if not self.is_running:
+                        break
+                    await self._process_tick_message(message)
+                    
+            except websockets.exceptions.ConnectionClosed:
+                self.logger.warning("WebSocket connection closed")
+                if self.is_running:  # Only reconnect if service is still running
+                    self.logger.info("Attempting to reconnect...")
+                    await asyncio.sleep(self.reconnect_delay)
+                    continue
+                else:
+                    break
+                    
+            except KeyboardInterrupt:
+                self.logger.info("Service stopped by user")
+                self.is_running = False
+                break
+                
+            except Exception as e:
+                self.logger.error(f"Service error: {e}")
+                self.is_healthy = False
+                if self.is_running:  # Only reconnect if service is still running
+                    self.logger.info(f"Reconnecting after error in {self.reconnect_delay}s...")
+                    await asyncio.sleep(self.reconnect_delay)
+                    continue
+                else:
+                    break
+        
+        # Cancel periodic tasks
+        stock_refresh_task.cancel()
+        heartbeat_task.cancel()
+        
+        try:
+            await stock_refresh_task
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
+            
+        await self._cleanup()
     
     async def _periodic_stock_refresh(self):
         """Periodically refresh stock list"""
