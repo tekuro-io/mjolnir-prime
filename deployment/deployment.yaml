@@ -13,6 +13,8 @@ spec:
       app: mjolnir-pattern-detector
   template:
     metadata:
+      annotations:
+        git-tag: {TAG}
       labels:
         app: mjolnir-pattern-detector
     spec:
